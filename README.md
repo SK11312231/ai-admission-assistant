@@ -9,6 +9,26 @@ A platform that helps institutes, coaching centers, and universities capture stu
 - **Database:** SQLite (via `better-sqlite3`)
 - **WhatsApp Integration:** WhatsApp Business Cloud API (Meta)
 
+## Data Storage
+
+All application data is stored in a local **SQLite** database file at `server/admission.db` using the [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) driver. The database runs in [WAL mode](https://www.sqlite.org/wal.html) for better concurrent read performance. Tables are created on first server start if they don't already exist (via `server/src/db.ts`), so no manual migration step is needed.
+
+### Database Tables
+
+| Table | Purpose |
+|-------|---------|
+| `institutes` | Registered institutes / coaching centers (name, email, phone, WhatsApp number, plan, hashed password) |
+| `leads` | Student inquiries captured via WhatsApp (linked to an institute, includes student phone, message, and status) |
+| `universities` | University catalog used by the AI admission counselor (name, location, ranking, acceptance rate, programs, description) |
+| `messages` | Chat conversation history between students and the AI counselor (session-based, stores role and content) |
+
+### Key Details
+
+- **File location:** `server/admission.db` (auto-created on first server start, git-ignored)
+- **Engine:** SQLite 3 via `better-sqlite3` (embedded, no external database server required)
+- **Initialization:** All tables use `CREATE TABLE IF NOT EXISTS`, making startup idempotent
+- **Seeding:** The `universities` table is populated with sample data on first run via `server/src/seed.ts`
+
 ## Quickstart
 
 ### Prerequisites
@@ -97,9 +117,10 @@ ai-admission-assistant/
 │       └── pages/           # Home, Register, Login, Dashboard
 └── server/                  # Express + TypeScript backend
     └── src/
-        ├── db.ts            # SQLite database setup (institutes, leads)
+        ├── db.ts            # SQLite database setup (all tables)
+        ├── seed.ts          # University sample data seeder
         ├── index.ts         # Server entry point
-        └── routes/          # institutes.ts, leads.ts, webhook.ts
+        └── routes/          # institutes, leads, universities, chat, webhook
 ```
 
 
