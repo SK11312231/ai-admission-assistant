@@ -1,20 +1,20 @@
-# AI Admission Assistant
+# Lead Capture Platform
 
-An AI-powered college/university admission assistant that helps prospective students explore universities, check admission requirements, get personalized recommendations, and get answers to admission-related questions via an AI chatbot.
+A platform that helps institutes, coaching centers, and universities capture student leads efficiently via WhatsApp. When a student sends a WhatsApp inquiry to a registered institute, a lead is automatically created and an instant auto-reply is sent back.
 
 ## Tech Stack
 
 - **Frontend:** React + TypeScript, Tailwind CSS, React Router, Vite
 - **Backend:** Node.js + Express (TypeScript)
-- **AI:** OpenAI GPT-4o
 - **Database:** SQLite (via `better-sqlite3`)
+- **WhatsApp Integration:** WhatsApp Business Cloud API (Meta)
 
 ## Quickstart
 
 ### Prerequisites
 
 - Node.js >= 18
-- An [OpenAI API key](https://platform.openai.com/api-keys)
+- (Optional) A [Meta WhatsApp Business API](https://developers.facebook.com/docs/whatsapp/cloud-api) token for WhatsApp integration
 
 ### Three steps to run
 
@@ -22,7 +22,7 @@ An AI-powered college/university admission assistant that helps prospective stud
 # 1. Install all dependencies
 npm install
 
-# 2. Create server/.env and follow the prompt to add your OpenAI API key
+# 2. Create server/.env and configure environment variables
 npm run setup
 
 # 3. Start both servers (client + API)
@@ -34,26 +34,47 @@ npm run dev
 | Client (React) | http://localhost:5173 |
 | API (Express) | http://localhost:3001 |
 
-> **Note:** The database is seeded automatically when the server starts for the first time.
-> You can also seed manually with `npm run seed`.
+### WhatsApp Integration Setup
+
+To enable automatic lead capture via WhatsApp, add the following to `server/.env`:
+
+```env
+WHATSAPP_VERIFY_TOKEN=your_custom_verification_token
+WHATSAPP_API_TOKEN=your_meta_access_token
+```
+
+Then configure a webhook in your Meta Business App pointing to:
+- **Verify (GET):** `https://your-domain.com/api/webhook/whatsapp`
+- **Messages (POST):** `https://your-domain.com/api/webhook/whatsapp`
 
 ## Usage
 
-- **Home (`/`)** — Overview and quick-start CTA.
-- **Chat (`/chat`)** — Ask the AI admission counselor anything about universities, requirements, and applications.
-- **Universities (`/universities`)** — Browse the seeded university database with rankings and acceptance rates.
+- **Home (`/`)** — Platform overview, features, and pricing plans.
+- **Register (`/register`)** — Register your institute with name, email, phone, WhatsApp number, and plan.
+- **Login (`/login`)** — Login to access your dashboard.
+- **Dashboard (`/dashboard`)** — View and manage all student leads with status tracking and filters.
 
 ## API Endpoints
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/universities` | List all universities |
-| GET | `/api/universities/:id` | Get a single university |
-| POST | `/api/chat` | Send a message to the AI counselor |
+| POST | `/api/institutes/register` | Register a new institute |
+| POST | `/api/institutes/login` | Login as an institute |
+| GET | `/api/leads/:instituteId` | Get all leads for an institute |
+| PATCH | `/api/leads/:leadId/status` | Update a lead's status |
+| GET | `/api/webhook/whatsapp` | WhatsApp webhook verification |
+| POST | `/api/webhook/whatsapp` | Receive incoming WhatsApp messages |
 
-### POST `/api/chat` body
+### POST `/api/institutes/register` body
 ```json
-{ "message": "Which universities have the best CS programs?", "sessionId": "abc123" }
+{
+  "name": "ABC Coaching Center",
+  "email": "contact@abc.com",
+  "phone": "+919876543210",
+  "whatsapp_number": "+919876543210",
+  "plan": "free",
+  "password": "securepassword"
+}
 ```
 
 ## Scripts
@@ -63,24 +84,22 @@ npm run dev
 | `npm run setup` | First-time setup — creates `server/.env` |
 | `npm run dev` | Start client + server in watch mode |
 | `npm run build` | Production build (server + client) |
-| `npm run seed` | Manually seed the database |
 
 ## Project Structure
 
 ```
 ai-admission-assistant/
 ├── scripts/
-│   └── setup.mjs        # First-time setup helper
-├── client/              # Vite + React + TypeScript frontend
+│   └── setup.mjs           # First-time setup helper
+├── client/                  # Vite + React + TypeScript frontend
 │   └── src/
-│       ├── components/  # Navbar, ChatWindow, MessageBubble, UniversityCard
-│       └── pages/       # Home, Chat, Universities
-└── server/              # Express + TypeScript backend
+│       ├── components/      # Navbar
+│       └── pages/           # Home, Register, Login, Dashboard
+└── server/                  # Express + TypeScript backend
     └── src/
-        ├── db.ts         # SQLite database setup
-        ├── seed.ts       # Sample data seeder
-        ├── index.ts      # Server entry point
-        └── routes/       # chat.ts, universities.ts
+        ├── db.ts            # SQLite database setup (institutes, leads)
+        ├── index.ts         # Server entry point
+        └── routes/          # institutes.ts, leads.ts, webhook.ts
 ```
 
 
