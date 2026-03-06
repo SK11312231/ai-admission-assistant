@@ -77,11 +77,6 @@ export default function Dashboard() {
     }
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('institute');
-    navigate('/login');
-  };
-
   const filteredLeads = filter === 'all' ? leads : leads.filter((l) => l.status === filter);
 
   const stats = {
@@ -106,12 +101,6 @@ export default function Dashboard() {
             </span>
           </p>
         </div>
-        <button
-          onClick={handleLogout}
-          className="text-sm text-gray-500 hover:text-red-600 transition-colors"
-        >
-          Logout
-        </button>
       </div>
 
       {/* Stats */}
