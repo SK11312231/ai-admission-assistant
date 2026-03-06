@@ -37,4 +37,28 @@ db.exec(`
   );
 `);
 
+// Create universities table — stores university data for AI counselor
+db.exec(`
+  CREATE TABLE IF NOT EXISTS universities (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL,
+    location TEXT NOT NULL,
+    ranking INTEGER NOT NULL,
+    acceptance_rate REAL NOT NULL,
+    programs TEXT NOT NULL,
+    description TEXT NOT NULL
+  );
+`);
+
+// Create messages table — stores chat conversation history per session
+db.exec(`
+  CREATE TABLE IF NOT EXISTS messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
+    content TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+  );
+`);
+
 export default db;
