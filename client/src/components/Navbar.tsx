@@ -35,6 +35,7 @@ export default function Navbar() {
           {loggedIn ? (
             <button
               onClick={handleLogout}
+              aria-label="Log out of dashboard"
               className="text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
             >
               Logout
