@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import db from '../db';
+import pool from '../db';
 
 const router = Router();
 
@@ -14,11 +14,10 @@ interface University {
 }
 
 // GET /api/universities — return all universities ordered by ranking
-router.get('/', (_req: Request, res: Response) => {
+router.get('/', async (_req: Request, res: Response) => {
   try {
-    const universities = db
-      .prepare('SELECT * FROM universities ORDER BY ranking ASC')
-      .all() as University[];
+    const result = await pool.query('SELECT * FROM universities ORDER BY ranking ASC');
+    const universities = result.rows as University[];
 
     // Parse programs JSON for each university
     const parsed = universities.map((u) => ({
@@ -34,12 +33,11 @@ router.get('/', (_req: Request, res: Response) => {
 });
 
 // GET /api/universities/:id — return a single university
-router.get('/:id', (req: Request, res: Response) => {
+router.get('/:id', async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const university = db
-      .prepare('SELECT * FROM universities WHERE id = ?')
-      .get(id) as University | undefined;
+    const result = await pool.query('SELECT * FROM universities WHERE id = $1', [id]);
+    const university = result.rows[0] as University | undefined;
 
     if (!university) {
       res.status(404).json({ error: 'University not found.' });

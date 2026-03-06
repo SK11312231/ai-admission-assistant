@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
-import db from '../db';
+import pool from '../db';
 
 const router = Router();
 
@@ -32,10 +32,9 @@ function getOpenAI(): OpenAI {
 }
 
 // Build the system prompt with current universities data
-function buildSystemPrompt(): string {
-  const universities = db
-    .prepare('SELECT * FROM universities ORDER BY ranking ASC')
-    .all() as University[];
+async function buildSystemPrompt(): Promise<string> {
+  const result = await pool.query('SELECT * FROM universities ORDER BY ranking ASC');
+  const universities = result.rows as University[];
 
   const uniList = universities
     .map((u) => {
@@ -79,25 +78,25 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     // Persist the user message
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(
-      sessionId,
-      'user',
-      message.trim(),
+    await pool.query(
+      'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
+      [sessionId, 'user', message.trim()],
     );
 
     // Retrieve conversation history for this session (last 20 messages for context)
-    const history = db
-      .prepare(
-        'SELECT role, content FROM messages WHERE session_id = ? ORDER BY created_at ASC LIMIT 20',
-      )
-      .all(sessionId) as MessageRow[];
+    const historyResult = await pool.query(
+      'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 20',
+      [sessionId],
+    );
+    const history = historyResult.rows as MessageRow[];
 
     // Call OpenAI
     const client = getOpenAI();
+    const systemPrompt = await buildSystemPrompt();
     const completion = await client.chat.completions.create({
       model: 'gpt-4o',
       messages: [
-        { role: 'system', content: buildSystemPrompt() },
+        { role: 'system', content: systemPrompt },
         ...history.map((m) => ({ role: m.role, content: m.content })),
       ],
       temperature: 0.7,
@@ -107,10 +106,9 @@ router.post('/', async (req: Request, res: Response) => {
     const reply = completion.choices[0]?.message?.content ?? 'Sorry, I could not generate a response.';
 
     // Persist the assistant reply
-    db.prepare('INSERT INTO messages (session_id, role, content) VALUES (?, ?, ?)').run(
-      sessionId,
-      'assistant',
-      reply,
+    await pool.query(
+      'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
+      [sessionId, 'assistant', reply],
     );
 
     res.json({ reply });
