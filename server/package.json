@@ -6,7 +6,8 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
     "start": "node dist/index.js",
-    "seed": "tsx src/seed.ts"
+    "seed": "tsx src/seed.ts",
+    "postinstall": "npm rebuild better-sqlite3"
   },
   "dependencies": {
     "better-sqlite3": "^11.10.0",
