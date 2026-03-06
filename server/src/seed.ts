@@ -178,12 +178,19 @@ const universities = [
   },
 ];
 
-// Only seed if the table is empty
-const existing = db.prepare('SELECT id FROM universities LIMIT 1').get() as UniversityRow | undefined;
+/**
+ * Seeds the universities table with sample data.
+ * Safe to call multiple times — does nothing if data already exists.
+ * @param verbose - set true to log a message when already seeded (CLI usage)
+ */
+export function seed(verbose = false): void {
+  const existing = db.prepare('SELECT id FROM universities LIMIT 1').get() as UniversityRow | undefined;
 
-if (existing) {
-  console.log('Database already seeded. Skipping.');
-} else {
+  if (existing) {
+    if (verbose) console.log('ℹ️  Database already seeded. Skipping.');
+    return;
+  }
+
   const insert = db.prepare(`
     INSERT INTO universities (name, location, ranking, acceptance_rate, programs, description)
     VALUES (@name, @location, @ranking, @acceptance_rate, @programs, @description)
@@ -196,5 +203,11 @@ if (existing) {
   });
 
   insertMany(universities);
-  console.log(`Seeded ${universities.length} universities successfully.`);
+  console.log(`✅ Seeded ${universities.length} universities into the database.`);
+}
+
+// When run directly as a CLI script (npm run seed), always show output.
+// Use includes() so it matches both src/seed.ts and dist/seed.js paths.
+if (process.argv[1]?.includes('/seed.ts') || process.argv[1]?.includes('/seed.js')) {
+  seed(true);
 }

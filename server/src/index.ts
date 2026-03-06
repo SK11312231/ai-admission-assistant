@@ -2,11 +2,25 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { seed } from './seed';
+import { ENV_PLACEHOLDER } from './constants';
 import universitiesRouter from './routes/universities';
 import chatRouter from './routes/chat';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
+
+// Auto-seed the database with sample universities if it is empty
+seed();
+
+// Warn early if the OpenAI key is missing so developers see it immediately in the logs
+if (!process.env.OPENAI_API_KEY || process.env.OPENAI_API_KEY === ENV_PLACEHOLDER) {
+  console.warn(
+    '\n⚠️  OPENAI_API_KEY is not configured.\n' +
+    '   The /api/chat endpoint will return errors until a valid key is set.\n' +
+    '   Add it to server/.env — see .env.example for the format.\n',
+  );
+}
 
 // Middleware
 app.use(cors({ origin: 'http://localhost:5173', credentials: true }));
