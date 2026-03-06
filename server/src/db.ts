@@ -1,8 +1,11 @@
 import Database from 'better-sqlite3';
 import path from 'path';
 
-// Store the database file next to the server package
-const DB_PATH = path.join(__dirname, '..', 'admission.db');
+// Allow DB path to be configured via env var.
+// Fallback to process.cwd() so the DB lands in the server working directory
+// in both development (server/) and after TypeScript compilation (dist/ runs
+// with cwd = server/), avoiding __dirname-based paths that shift after tsc.
+const DB_PATH = process.env.DATABASE_PATH ?? path.join(process.cwd(), 'admission.db');
 
 const db = new Database(DB_PATH);
 
