@@ -32,23 +32,19 @@ export default function Navbar() {
 
         {/* Navigation links */}
         <div className="flex items-center gap-6">
-          <NavLink to="/" end className={linkClass}>
-            Home
-          </NavLink>
           {loggedIn ? (
-            <>
-              <NavLink to="/dashboard" className={linkClass}>
-                Dashboard
-              </NavLink>
-              <button
-                onClick={handleLogout}
-                className="text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
-              >
-                Logout
-              </button>
-            </>
+            <button
+              onClick={handleLogout}
+              aria-label="Log out of dashboard"
+              className="text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
+            >
+              Logout
+            </button>
           ) : (
             <>
+              <NavLink to="/" end className={linkClass}>
+                Home
+              </NavLink>
               <NavLink to="/login" className={linkClass}>
                 Login
               </NavLink>
