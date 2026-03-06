@@ -2,7 +2,7 @@
 nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake"]
 
 [phases.install]
-cmds = ["npm ci --workspace=server --workspace=client"]
+cmds = ["npm ci"]
 
 [phases.build]
 cmds = ["npm run build --workspace=server", "npm run build --workspace=client"]
