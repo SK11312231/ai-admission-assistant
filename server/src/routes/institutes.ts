@@ -15,16 +15,20 @@ interface InstituteRow {
   created_at: string;
 }
 
-// Simple password hashing using Node built-in crypto (SHA-256 + salt)
+// Password hashing using PBKDF2 (designed for password storage, unlike plain SHA-256)
+const PBKDF2_ITERATIONS = 100_000;
+const KEY_LENGTH = 64;
+const DIGEST = 'sha512';
+
 function hashPassword(password: string): string {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.createHash('sha256').update(salt + password).digest('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, DIGEST).toString('hex');
   return `${salt}:${hash}`;
 }
 
 function verifyPassword(password: string, stored: string): boolean {
   const [salt, hash] = stored.split(':');
-  const computed = crypto.createHash('sha256').update(salt + password).digest('hex');
+  const computed = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, DIGEST).toString('hex');
   return computed === hash;
 }
 
