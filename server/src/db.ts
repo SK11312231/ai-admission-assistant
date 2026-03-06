@@ -4,7 +4,11 @@ import { Pool } from 'pg';
 // For local development, set it in server/.env.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
+  // Always use SSL for Railway Postgres (self-signed cert OK).
+  // Skip SSL only for localhost connections.
+  ssl: process.env.DATABASE_URL?.includes('localhost')
+    ? undefined
+    : { rejectUnauthorized: false },
 });
 
 /**
@@ -12,6 +16,8 @@ const pool = new Pool({
  * Called once on server startup (from index.ts).
  */
 export async function initDB(): Promise<void> {
+  console.log('🔧 Running initDB()...');
+
   // Create institutes table — stores registered institutes / coaching centers
   await pool.query(`
     CREATE TABLE IF NOT EXISTS institutes (
@@ -25,6 +31,7 @@ export async function initDB(): Promise<void> {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  console.log('  ✅ institutes table ready');
 
   // Create leads table — stores student inquiries received via WhatsApp
   await pool.query(`
@@ -38,6 +45,7 @@ export async function initDB(): Promise<void> {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  console.log('  ✅ leads table ready');
 
   // Create universities table — stores university data for AI counselor
   await pool.query(`
@@ -51,6 +59,7 @@ export async function initDB(): Promise<void> {
       description TEXT NOT NULL
     );
   `);
+  console.log('  ✅ universities table ready');
 
   // Create messages table — stores chat conversation history per session
   await pool.query(`
@@ -62,6 +71,9 @@ export async function initDB(): Promise<void> {
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
   `);
+  console.log('  ✅ messages table ready');
+
+  console.log('✅ initDB() complete — all tables ready.');
 }
 
 export default pool;
