@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
-import db from '../db';
+import pool from '../db';
 
 const router = Router();
 
@@ -33,7 +33,7 @@ function verifyPassword(password: string, stored: string): boolean {
 }
 
 // POST /api/institutes/register — register a new institute
-router.post('/register', (req: Request, res: Response) => {
+router.post('/register', async (req: Request, res: Response) => {
   const { name, email, phone, whatsapp_number, plan, password } = req.body as {
     name?: string;
     email?: string;
@@ -71,31 +71,33 @@ router.post('/register', (req: Request, res: Response) => {
 
   try {
     // Check for duplicate email or WhatsApp number
-    const existing = db
-      .prepare('SELECT id FROM institutes WHERE email = ? OR whatsapp_number = ?')
-      .get(email.trim().toLowerCase(), whatsapp_number.trim()) as InstituteRow | undefined;
+    const existing = await pool.query(
+      'SELECT id FROM institutes WHERE email = $1 OR whatsapp_number = $2',
+      [email.trim().toLowerCase(), whatsapp_number.trim()]
+    );
 
-    if (existing) {
+    if (existing.rows.length > 0) {
       res.status(409).json({ error: 'An institute with this email or WhatsApp number already exists.' });
       return;
     }
 
     const passwordHash = hashPassword(password);
 
-    const result = db.prepare(
+    const result = await pool.query(
       `INSERT INTO institutes (name, email, phone, whatsapp_number, plan, password_hash)
-       VALUES (?, ?, ?, ?, ?, ?)`
-    ).run(
-      name.trim(),
-      email.trim().toLowerCase(),
-      phone.trim(),
-      whatsapp_number.trim(),
-      plan,
-      passwordHash
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+      [
+        name.trim(),
+        email.trim().toLowerCase(),
+        phone.trim(),
+        whatsapp_number.trim(),
+        plan,
+        passwordHash,
+      ]
     );
 
     res.status(201).json({
-      id: result.lastInsertRowid,
+      id: result.rows[0].id,
       name: name.trim(),
       email: email.trim().toLowerCase(),
       phone: phone.trim(),
@@ -109,7 +111,7 @@ router.post('/register', (req: Request, res: Response) => {
 });
 
 // POST /api/institutes/login — authenticate an institute
-router.post('/login', (req: Request, res: Response) => {
+router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body as { email?: string; password?: string };
 
   if (!email || typeof email !== 'string') {
@@ -122,9 +124,11 @@ router.post('/login', (req: Request, res: Response) => {
   }
 
   try {
-    const institute = db
-      .prepare('SELECT * FROM institutes WHERE email = ?')
-      .get(email.trim().toLowerCase()) as InstituteRow | undefined;
+    const result = await pool.query(
+      'SELECT * FROM institutes WHERE email = $1',
+      [email.trim().toLowerCase()]
+    );
+    const institute = result.rows[0] as InstituteRow | undefined;
 
     if (!institute || !verifyPassword(password, institute.password_hash)) {
       res.status(401).json({ error: 'Invalid email or password.' });

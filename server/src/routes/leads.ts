@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import db from '../db';
+import pool from '../db';
 
 const router = Router();
 
@@ -14,15 +14,16 @@ interface LeadRow {
 }
 
 // GET /api/leads/:instituteId — return all leads for an institute
-router.get('/:instituteId', (req: Request, res: Response) => {
+router.get('/:instituteId', async (req: Request, res: Response) => {
   const { instituteId } = req.params;
 
   try {
-    const leads = db
-      .prepare('SELECT * FROM leads WHERE institute_id = ? ORDER BY created_at DESC')
-      .all(Number(instituteId)) as LeadRow[];
+    const result = await pool.query(
+      'SELECT * FROM leads WHERE institute_id = $1 ORDER BY created_at DESC',
+      [Number(instituteId)]
+    );
 
-    res.json(leads);
+    res.json(result.rows as LeadRow[]);
   } catch (err) {
     console.error('Error fetching leads:', err);
     res.status(500).json({ error: 'Failed to fetch leads.' });
@@ -30,7 +31,7 @@ router.get('/:instituteId', (req: Request, res: Response) => {
 });
 
 // PATCH /api/leads/:leadId/status — update a lead's status
-router.patch('/:leadId/status', (req: Request, res: Response) => {
+router.patch('/:leadId/status', async (req: Request, res: Response) => {
   const { leadId } = req.params;
   const { status } = req.body as { status?: string };
 
@@ -40,11 +41,12 @@ router.patch('/:leadId/status', (req: Request, res: Response) => {
   }
 
   try {
-    const result = db
-      .prepare('UPDATE leads SET status = ? WHERE id = ?')
-      .run(status, Number(leadId));
+    const result = await pool.query(
+      'UPDATE leads SET status = $1 WHERE id = $2',
+      [status, Number(leadId)]
+    );
 
-    if (result.changes === 0) {
+    if (result.rowCount === 0) {
       res.status(404).json({ error: 'Lead not found.' });
       return;
     }

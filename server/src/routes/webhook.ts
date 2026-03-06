@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import db from '../db';
+import pool from '../db';
 
 const router = Router();
 
@@ -8,10 +8,6 @@ interface InstituteRow {
   name: string;
   whatsapp_number: string;
   plan: string;
-}
-
-interface LeadRow {
-  id: number;
 }
 
 /**
@@ -79,11 +75,11 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     if (displayPhone) {
       // Normalize: remove any non-digit characters for matching
       const normalized = displayPhone.replace(/\D/g, '');
-      institute = db
-        .prepare(
-          `SELECT * FROM institutes WHERE REPLACE(REPLACE(REPLACE(whatsapp_number, '+', ''), '-', ''), ' ', '') = ?`
-        )
-        .get(normalized) as InstituteRow | undefined;
+      const result = await pool.query(
+        `SELECT * FROM institutes WHERE REGEXP_REPLACE(whatsapp_number, '[^0-9]', '', 'g') = $1`,
+        [normalized]
+      );
+      institute = result.rows[0] as InstituteRow | undefined;
     }
 
     if (!institute) {
@@ -93,10 +89,11 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     }
 
     // Create a lead for this inquiry
-    db.prepare(
+    await pool.query(
       `INSERT INTO leads (institute_id, student_name, student_phone, message)
-       VALUES (?, ?, ?, ?)`
-    ).run(institute.id, studentName ?? null, studentPhone, messageBody);
+       VALUES ($1, $2, $3, $4)`,
+      [institute.id, studentName ?? null, studentPhone, messageBody]
+    );
 
     // Send an auto-reply via WhatsApp Cloud API
     const apiToken = process.env.WHATSAPP_API_TOKEN;

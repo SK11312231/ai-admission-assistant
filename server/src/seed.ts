@@ -1,9 +1,4 @@
-import db from './db';
-
-interface UniversityRow {
-  id: number;
-  name: string;
-}
+import pool from './db';
 
 const universities = [
   {
@@ -183,31 +178,45 @@ const universities = [
  * Safe to call multiple times — does nothing if data already exists.
  * @param verbose - set true to log a message when already seeded (CLI usage)
  */
-export function seed(verbose = false): void {
-  const existing = db.prepare('SELECT id FROM universities LIMIT 1').get() as UniversityRow | undefined;
+export async function seed(verbose = false): Promise<void> {
+  const existing = await pool.query('SELECT id FROM universities LIMIT 1');
 
-  if (existing) {
+  if (existing.rows.length > 0) {
     if (verbose) console.log('ℹ️  Database already seeded. Skipping.');
     return;
   }
 
-  const insert = db.prepare(`
-    INSERT INTO universities (name, location, ranking, acceptance_rate, programs, description)
-    VALUES (@name, @location, @ranking, @acceptance_rate, @programs, @description)
-  `);
-
-  const insertMany = db.transaction((rows: typeof universities) => {
-    for (const row of rows) {
-      insert.run(row);
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    for (const u of universities) {
+      await client.query(
+        `INSERT INTO universities (name, location, ranking, acceptance_rate, programs, description)
+         VALUES ($1, $2, $3, $4, $5, $6)`,
+        [u.name, u.location, u.ranking, u.acceptance_rate, u.programs, u.description]
+      );
     }
-  });
-
-  insertMany(universities);
-  console.log(`✅ Seeded ${universities.length} universities into the database.`);
+    await client.query('COMMIT');
+    console.log(`✅ Seeded ${universities.length} universities into the database.`);
+  } catch (err) {
+    await client.query('ROLLBACK');
+    throw err;
+  } finally {
+    client.release();
+  }
 }
 
 // When run directly as a CLI script (npm run seed), always show output.
 // Use includes() so it matches both src/seed.ts and dist/seed.js paths.
 if (process.argv[1]?.includes('/seed.ts') || process.argv[1]?.includes('/seed.js')) {
-  seed(true);
+  // Need to import and call initDB first, then seed
+  import('./db').then(async (mod) => {
+    const { initDB } = mod;
+    await initDB();
+    await seed(true);
+    process.exit(0);
+  }).catch((err) => {
+    console.error('Seed failed:', err);
+    process.exit(1);
+  });
 }

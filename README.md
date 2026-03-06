@@ -6,12 +6,12 @@ A platform that helps institutes, coaching centers, and universities capture stu
 
 - **Frontend:** React + TypeScript, Tailwind CSS, React Router, Vite
 - **Backend:** Node.js + Express (TypeScript)
-- **Database:** SQLite (via `better-sqlite3`)
+- **Database:** PostgreSQL (via `pg` / node-postgres) — hosted on Railway
 - **WhatsApp Integration:** WhatsApp Business Cloud API (Meta)
 
 ## Data Storage
 
-All application data is stored in a local **SQLite** database file at `server/admission.db` using the [`better-sqlite3`](https://github.com/WiseLibs/better-sqlite3) driver. The database runs in [WAL mode](https://www.sqlite.org/wal.html) for better concurrent read performance. Tables are created on first server start if they don't already exist (via `server/src/db.ts`), so no manual migration step is needed.
+All application data is stored in a **PostgreSQL** database using the [`pg`](https://node-postgres.com/) (node-postgres) driver. On Railway, a PostgreSQL service is provisioned and the `DATABASE_URL` environment variable is automatically injected. Tables are created on first server start if they don't already exist (via `server/src/db.ts`), so no manual migration step is needed.
 
 ### Database Tables
 
@@ -24,8 +24,8 @@ All application data is stored in a local **SQLite** database file at `server/ad
 
 ### Key Details
 
-- **File location:** `server/admission.db` (auto-created on first server start, git-ignored)
-- **Engine:** SQLite 3 via `better-sqlite3` (embedded, no external database server required)
+- **Connection:** Configured via `DATABASE_URL` environment variable (automatically set by Railway when a PostgreSQL service is linked)
+- **Engine:** PostgreSQL via `pg` (node-postgres)
 - **Initialization:** All tables use `CREATE TABLE IF NOT EXISTS`, making startup idempotent
 - **Seeding:** The `universities` table is populated with sample data on first run via `server/src/seed.ts`
 
@@ -117,7 +117,7 @@ ai-admission-assistant/
 │       └── pages/           # Home, Register, Login, Dashboard
 └── server/                  # Express + TypeScript backend
     └── src/
-        ├── db.ts            # SQLite database setup (all tables)
+        ├── db.ts            # PostgreSQL database setup (all tables)
         ├── seed.ts          # University sample data seeder
         ├── index.ts         # Server entry point
         └── routes/          # institutes, leads, universities, chat, webhook

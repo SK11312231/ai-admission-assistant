@@ -2,6 +2,8 @@ import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
 import rateLimit from 'express-rate-limit';
+import { initDB } from './db';
+import { seed } from './seed';
 import institutesRouter from './routes/institutes';
 import leadsRouter from './routes/leads';
 import webhookRouter from './routes/webhook';
@@ -46,6 +48,17 @@ app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
+// Initialise the database, seed sample data, then start the server
+(async () => {
+  try {
+    await initDB();
+    console.log('✅ Database tables initialised.');
+    await seed();
+    app.listen(PORT, () => {
+      console.log(`Server running on http://localhost:${PORT}`);
+    });
+  } catch (err) {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  }
+})();
