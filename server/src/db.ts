@@ -9,27 +9,31 @@ const db = new Database(DB_PATH);
 // Enable WAL mode for better concurrent read performance
 db.pragma('journal_mode = WAL');
 
-// Create universities table
+// Create institutes table — stores registered institutes / coaching centers
 db.exec(`
-  CREATE TABLE IF NOT EXISTS universities (
+  CREATE TABLE IF NOT EXISTS institutes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT NOT NULL,
-    location TEXT NOT NULL,
-    ranking INTEGER NOT NULL,
-    acceptance_rate REAL NOT NULL,
-    programs TEXT NOT NULL,   -- JSON array of program names
-    description TEXT NOT NULL
+    email TEXT NOT NULL UNIQUE,
+    phone TEXT NOT NULL,
+    whatsapp_number TEXT NOT NULL UNIQUE,
+    plan TEXT NOT NULL CHECK(plan IN ('free', 'advance', 'pro')),
+    password_hash TEXT NOT NULL,
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
   );
 `);
 
-// Create messages table for chat history
+// Create leads table — stores student inquiries received via WhatsApp
 db.exec(`
-  CREATE TABLE IF NOT EXISTS messages (
+  CREATE TABLE IF NOT EXISTS leads (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    session_id TEXT NOT NULL,
-    role TEXT NOT NULL CHECK(role IN ('user', 'assistant')),
-    content TEXT NOT NULL,
-    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    institute_id INTEGER NOT NULL,
+    student_name TEXT,
+    student_phone TEXT NOT NULL,
+    message TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'contacted', 'converted', 'lost')),
+    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (institute_id) REFERENCES institutes(id)
   );
 `);
 
