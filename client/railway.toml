@@ -1,6 +1,5 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "cd .. && npm ci && npm run build --workspace=client"
 
 [deploy]
-startCommand = "node_modules/.bin/serve dist -s -l $PORT"
+startCommand = "npx --yes serve client/dist -s -l $PORT"
