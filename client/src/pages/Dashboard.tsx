@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { apiUrl } from '../lib/api';
 
 interface Institute {
   id: number;
@@ -46,7 +47,7 @@ export default function Dashboard() {
 
     const fetchLeads = async () => {
       try {
-        const res = await fetch(`/api/leads/${inst.id}`);
+        const res = await fetch(apiUrl(`/api/leads/${inst.id}`));
         if (!res.ok) throw new Error('Failed to fetch leads.');
         const data = (await res.json()) as Lead[];
         setLeads(data);
@@ -62,7 +63,7 @@ export default function Dashboard() {
 
   const updateStatus = async (leadId: number, status: string) => {
     try {
-      const res = await fetch(`/api/leads/${leadId}/status`, {
+      const res = await fetch(apiUrl(`/api/leads/${leadId}/status`), {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ status }),
