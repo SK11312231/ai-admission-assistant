@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import UniversityCard from '../components/UniversityCard';
+import { apiUrl } from '../lib/api';
 
 interface University {
   id: number;
@@ -19,7 +20,7 @@ export default function Universities() {
   useEffect(() => {
     const fetchUniversities = async () => {
       try {
-        const res = await fetch('/api/universities');
+        const res = await fetch(apiUrl('/api/universities'));
         if (!res.ok) throw new Error('Failed to load universities.');
         const data = (await res.json()) as University[];
         setUniversities(data);
