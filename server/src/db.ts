@@ -4,10 +4,7 @@ import { Pool } from 'pg';
 // For local development, set it in server/.env.
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  // Railway uses self-signed certs; allow them in production
-  ssl: process.env.DATABASE_URL?.includes('railway')
-    ? { rejectUnauthorized: false }
-    : undefined,
+  ssl: process.env.NODE_ENV === 'production' ? { rejectUnauthorized: false } : undefined,
 });
 
 /**

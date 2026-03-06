@@ -53,10 +53,13 @@ app.get('/health', (_req, res) => {
   try {
     await initDB();
     console.log('✅ Database tables initialised.');
-    await seed();
+
+    // Start listening before seeding so health checks work during startup
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);
     });
+
+    await seed();
   } catch (err) {
     console.error('Failed to start server:', err);
     process.exit(1);
