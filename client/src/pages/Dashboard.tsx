@@ -93,7 +93,7 @@ export default function Dashboard() {
     document.body.appendChild(script);
   }, []);
 
-  const handleConnectWhatsApp = async () => {
+  const handleConnectWhatsApp = () => {
     setConnectingWA(true);
     setWaError(null);
 
@@ -148,41 +148,46 @@ export default function Dashboard() {
       setConnectingWA(false);
     }, 2 * 60 * 1000);
 
+    // FB.login requires a plain synchronous callback — async functions are rejected
+    // by the SDK with "Expression is of type asyncfunction, not function".
+    // Wrap all async logic in a void IIFE inside the plain callback.
     window.FB.login(
-      async (response) => {
-        clearTimeout(timeoutId);
-        window.removeEventListener('message', handleMessage);
+      (response) => {
+        void (async () => {
+          clearTimeout(timeoutId);
+          window.removeEventListener('message', handleMessage);
 
-        if (!response.authResponse?.code) {
-          setWaError('WhatsApp connection was cancelled or failed. Please try again.');
-          setConnectingWA(false);
-          return;
-        }
-
-        try {
-          const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ code: response.authResponse.code }),
-          });
-          const data = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
-
-          if (!res.ok || !data.success) {
-            throw new Error(data.error ?? 'Failed to connect WhatsApp.');
+          if (!response.authResponse?.code) {
+            setWaError('WhatsApp connection was cancelled or failed. Please try again.');
+            setConnectingWA(false);
+            return;
           }
 
-          const updated = {
-            ...institute!,
-            whatsapp_number: data.whatsapp_number ?? institute!.whatsapp_number,
-            whatsapp_connected: true,
-          };
-          setInstitute(updated);
-          localStorage.setItem('institute', JSON.stringify(updated));
-        } catch (err) {
-          setWaError(err instanceof Error ? err.message : 'Something went wrong.');
-        } finally {
-          setConnectingWA(false);
-        }
+          try {
+            const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ code: response.authResponse.code }),
+            });
+            const data = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
+
+            if (!res.ok || !data.success) {
+              throw new Error(data.error ?? 'Failed to connect WhatsApp.');
+            }
+
+            const updated = {
+              ...institute!,
+              whatsapp_number: data.whatsapp_number ?? institute!.whatsapp_number,
+              whatsapp_connected: true,
+            };
+            setInstitute(updated);
+            localStorage.setItem('institute', JSON.stringify(updated));
+          } catch (err) {
+            setWaError(err instanceof Error ? err.message : 'Something went wrong.');
+          } finally {
+            setConnectingWA(false);
+          }
+        })();
       },
       {
         config_id: metaConfigId,
@@ -250,7 +255,7 @@ export default function Dashboard() {
             </p>
           </div>
           <button
-            onClick={() => void handleConnectWhatsApp()}
+            onClick={handleConnectWhatsApp}
             disabled={connectingWA}
             className="flex-shrink-0 bg-green-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
           >
@@ -259,7 +264,7 @@ export default function Dashboard() {
         </div>
       )}
       {waError && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-6 text-red-700 text-sm">
+        <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-6">
           {waError}
         </div>
       )}
@@ -272,7 +277,7 @@ export default function Dashboard() {
           { label: 'Contacted', value: stats.contacted, color: 'bg-yellow-50' },
           { label: 'Converted', value: stats.converted, color: 'bg-green-50' },
         ].map((s) => (
-          <div key={s.label} className={`${s.color} rounded-xl p-4 text-center border border-gray-200`}>
+          <div key={s.label} className={`${s.color} rounded-xl p-4 text-center border border-gray-200`}> 
             <p className="text-2xl font-bold text-gray-900">{s.value}</p>
             <p className="text-xs text-gray-500 mt-1">{s.label}</p>
           </div>
@@ -360,4 +365,3 @@ export default function Dashboard() {
     </div>
   );
 }
-
