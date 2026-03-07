@@ -38,7 +38,7 @@ interface MessageRow {
  *   4. Add the following environment variables in Railway:
  *        WHATSAPP_VERIFY_TOKEN   — a custom string you choose; put the same string in Meta webhook config
  *        WHATSAPP_API_TOKEN      — the permanent system user access token from Meta
- *        OPENAI_API_KEY          — your OpenAI API key for AI-powered replies
+ *        GROQ_API_KEY            — your Groq API key for AI-powered replies (free at console.groq.com)
  */
 
 // ── OpenAI helper ──────────────────────────────────────────────────────────
@@ -46,10 +46,13 @@ interface MessageRow {
 let openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
   if (!openai) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is not set.');
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error('GROQ_API_KEY is not set.');
     }
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openai = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
   }
   return openai;
 }
@@ -125,7 +128,7 @@ async function generateAIReply(
   const systemPrompt = await buildInstituteSystemPrompt(institute);
 
   const completion = await client.chat.completions.create({
-    model: 'gpt-4o',
+    model: 'llama-3.3-70b-versatile',
     messages: [
       { role: 'system', content: systemPrompt },
       ...history.map((m) => ({ role: m.role, content: m.content })),
