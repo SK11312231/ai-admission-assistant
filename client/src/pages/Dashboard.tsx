@@ -72,8 +72,6 @@ export default function Dashboard() {
       return;
     }
 
-    // Must be set BEFORE loading the SDK script to avoid a race condition
-    // where the browser executes the SDK from cache before fbAsyncInit is assigned.
     window.fbAsyncInit = function () {
       window.FB.init({
         appId: metaAppId,
@@ -110,9 +108,14 @@ export default function Dashboard() {
       return;
     }
 
-    // Listen for the postMessage event from the Embedded Signup popup.
-    // Meta sends WA_EMBEDDED_SIGNUP events via window.postMessage in addition
-    // to (or instead of) the FB.login callback in some configurations.
+    // Safety timeout
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('message', handleMessage);
+      setConnectingWA(false);
+    }, 2 * 60 * 1000);
+
+    // ✅ KEY FIX: Capture waba_id and phone_number_id from the FINISH postMessage event.
+    // Meta sends these directly — no code exchange needed for WABA details.
     const handleMessage = (event: MessageEvent) => {
       if (
         event.origin !== 'https://www.facebook.com' &&
@@ -124,16 +127,60 @@ export default function Dashboard() {
           ? (JSON.parse(event.data) as Record<string, unknown>)
           : (event.data as Record<string, unknown>);
 
+        console.log('WA Embedded Signup postMessage:', JSON.stringify(data));
+
         if (data.type === 'WA_EMBEDDED_SIGNUP') {
-          window.removeEventListener('message', handleMessage);
           if (data.event === 'CANCEL') {
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handleMessage);
             setWaError('WhatsApp connection was cancelled.');
             setConnectingWA(false);
           } else if (data.event === 'ERROR') {
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handleMessage);
             setWaError('An error occurred during WhatsApp signup.');
             setConnectingWA(false);
+          } else if (data.event === 'FINISH') {
+            // ✅ Extract waba_id and phone_number_id directly from postMessage
+            const finishData = data.data as { waba_id?: string; phone_number_id?: string } | undefined;
+            console.log('FINISH data:', JSON.stringify(finishData));
+
+            if (finishData?.waba_id && finishData?.phone_number_id) {
+              clearTimeout(timeoutId);
+              window.removeEventListener('message', handleMessage);
+
+              // Send waba_id + phone_number_id to backend — no code exchange needed
+              void (async () => {
+                try {
+                  const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      wabaId: finishData.waba_id,
+                      phoneNumberId: finishData.phone_number_id,
+                    }),
+                  });
+                  const resData = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
+
+                  if (!res.ok || !resData.success) {
+                    throw new Error(resData.error ?? 'Failed to connect WhatsApp.');
+                  }
+
+                  const updated = {
+                    ...institute!,
+                    whatsapp_number: resData.whatsapp_number ?? institute!.whatsapp_number,
+                    whatsapp_connected: true,
+                  };
+                  setInstitute(updated);
+                  localStorage.setItem('institute', JSON.stringify(updated));
+                } catch (err) {
+                  setWaError(err instanceof Error ? err.message : 'Something went wrong.');
+                } finally {
+                  setConnectingWA(false);
+                }
+              })();
+            }
           }
-          // FINISH is handled in the FB.login callback below
         }
       } catch {
         // ignore parse errors from non-JSON messages
@@ -142,56 +189,21 @@ export default function Dashboard() {
 
     window.addEventListener('message', handleMessage);
 
-    // Safety timeout: reset button after 2 minutes if the popup is closed without a response
-    const timeoutId = setTimeout(() => {
-      window.removeEventListener('message', handleMessage);
-      setConnectingWA(false);
-    }, 2 * 60 * 1000);
-
-    // FB.login requires a plain synchronous callback — async functions are rejected
-    // by the SDK with "Expression is of type asyncfunction, not function".
-    // Wrap all async logic in a void IIFE inside the plain callback.
+    // FB.login still needed to trigger the Embedded Signup popup
+    // We use the postMessage FINISH event above instead of authResponse.code
     window.FB.login(
       (response) => {
-        // ADD THIS LINE TEMPORARILY
-        console.log('Full auth response:', JSON.stringify(response));
-        void (async () => {
+        console.log('FB.login response:', JSON.stringify(response));
+        // ✅ If postMessage FINISH already handled it, do nothing here.
+        // If no FINISH postMessage came but we have a code, log it for debugging.
+        if (!response.authResponse?.code) {
           clearTimeout(timeoutId);
           window.removeEventListener('message', handleMessage);
-
-          if (!response.authResponse?.code) {
+          if (connectingWA) {
             setWaError('WhatsApp connection was cancelled or failed. Please try again.');
             setConnectingWA(false);
-            return;
           }
-
-          try {
-            const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ 
-                code: response.authResponse.code
-               }),
-            });
-            const data = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
-
-            if (!res.ok || !data.success) {
-              throw new Error(data.error ?? 'Failed to connect WhatsApp.');
-            }
-
-            const updated = {
-              ...institute!,
-              whatsapp_number: data.whatsapp_number ?? institute!.whatsapp_number,
-              whatsapp_connected: true,
-            };
-            setInstitute(updated);
-            localStorage.setItem('institute', JSON.stringify(updated));
-          } catch (err) {
-            setWaError(err instanceof Error ? err.message : 'Something went wrong.');
-          } finally {
-            setConnectingWA(false);
-          }
-        })();
+        }
       },
       {
         config_id: metaConfigId,
@@ -281,7 +293,7 @@ export default function Dashboard() {
           { label: 'Contacted', value: stats.contacted, color: 'bg-yellow-50' },
           { label: 'Converted', value: stats.converted, color: 'bg-green-50' },
         ].map((s) => (
-          <div key={s.label} className={`${s.color} rounded-xl p-4 text-center border border-gray-200`}> 
+          <div key={s.label} className={`${s.color} rounded-xl p-4 text-center border border-gray-200`}>
             <p className="text-2xl font-bold text-gray-900">{s.value}</p>
             <p className="text-xs text-gray-500 mt-1">{s.label}</p>
           </div>
