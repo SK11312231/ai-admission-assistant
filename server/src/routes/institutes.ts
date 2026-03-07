@@ -185,6 +185,7 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
     tokenUrl.searchParams.set('client_id', appId);
     tokenUrl.searchParams.set('client_secret', appSecret);
     tokenUrl.searchParams.set('code', code);
+    tokenUrl.searchParams.set('redirect_uri', 'https://www.facebook.com/connect/login_success.html');
 
     // ✅ Use the redirect_uri from the frontend (current page URL)
     // if (redirectUri) {
