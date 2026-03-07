@@ -66,21 +66,14 @@ export default function Dashboard() {
 
   // Load the Meta/Facebook JS SDK for Embedded Signup
   useEffect(() => {
-    if (document.getElementById('facebook-jssdk')) return;
-    const script = document.createElement('script');
-    script.id = 'facebook-jssdk';
-    script.src = 'https://connect.facebook.net/en_US/sdk.js';
-    script.async = true;
-    script.defer = true;
-    script.crossOrigin = 'anonymous';
-    document.body.appendChild(script);
-
     const metaAppId = import.meta.env.VITE_META_APP_ID as string | undefined;
     if (!metaAppId) {
       console.warn('VITE_META_APP_ID is not set — WhatsApp Embedded Signup will not work.');
       return;
     }
 
+    // Must be set BEFORE loading the SDK script to avoid a race condition
+    // where the browser executes the SDK from cache before fbAsyncInit is assigned.
     window.fbAsyncInit = function () {
       window.FB.init({
         appId: metaAppId,
@@ -89,6 +82,15 @@ export default function Dashboard() {
         version: 'v21.0',
       });
     };
+
+    if (document.getElementById('facebook-jssdk')) return;
+    const script = document.createElement('script');
+    script.id = 'facebook-jssdk';
+    script.src = 'https://connect.facebook.net/en_US/sdk.js';
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = 'anonymous';
+    document.body.appendChild(script);
   }, []);
 
   const handleConnectWhatsApp = async () => {
@@ -108,10 +110,51 @@ export default function Dashboard() {
       return;
     }
 
+    // Listen for the postMessage event from the Embedded Signup popup.
+    // Meta sends WA_EMBEDDED_SIGNUP events via window.postMessage in addition
+    // to (or instead of) the FB.login callback in some configurations.
+    const handleMessage = (event: MessageEvent) => {
+      if (
+        event.origin !== 'https://www.facebook.com' &&
+        event.origin !== 'https://web.facebook.com'
+      ) return;
+
+      try {
+        const data = typeof event.data === 'string'
+          ? (JSON.parse(event.data) as Record<string, unknown>)
+          : (event.data as Record<string, unknown>);
+
+        if (data.type === 'WA_EMBEDDED_SIGNUP') {
+          window.removeEventListener('message', handleMessage);
+          if (data.event === 'CANCEL') {
+            setWaError('WhatsApp connection was cancelled.');
+            setConnectingWA(false);
+          } else if (data.event === 'ERROR') {
+            setWaError('An error occurred during WhatsApp signup.');
+            setConnectingWA(false);
+          }
+          // FINISH is handled in the FB.login callback below
+        }
+      } catch {
+        // ignore parse errors from non-JSON messages
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // Safety timeout: reset button after 2 minutes if the popup is closed without a response
+    const timeoutId = setTimeout(() => {
+      window.removeEventListener('message', handleMessage);
+      setConnectingWA(false);
+    }, 2 * 60 * 1000);
+
     window.FB.login(
       async (response) => {
+        clearTimeout(timeoutId);
+        window.removeEventListener('message', handleMessage);
+
         if (!response.authResponse?.code) {
-          setWaError('WhatsApp connection was cancelled or failed.');
+          setWaError('WhatsApp connection was cancelled or failed. Please try again.');
           setConnectingWA(false);
           return;
         }
