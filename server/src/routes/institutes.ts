@@ -175,19 +175,20 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
     // token exchange to exactly match the URI used during the OAuth dialogue.
     // For the JS SDK Embedded Signup flow the implicit redirect_uri is always
     // https://www.facebook.com/connect/login_success.html
-    const tokenParams = new URLSearchParams({
-      client_id: appId,
-      client_secret: appSecret,
-      code,
+    // const tokenParams = new URLSearchParams({
+    //   client_id: appId,
+    //   client_secret: appSecret,
+    //   code,
+    // });
+
+    const tokenUrl = new URL('https://graph.facebook.com/v21.0/oauth/access_token');
+    tokenUrl.searchParams.set('client_id', appId);
+    tokenUrl.searchParams.set('client_secret', appSecret);
+    tokenUrl.searchParams.set('code', code);
+
+    const tokenRes = await fetch(tokenUrl.toString(), {
+      method: 'GET', // ✅ Must be GET, not POST
     });
-    const tokenRes = await fetch(
-      'https://graph.facebook.com/v21.0/oauth/access_token',
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: tokenParams.toString(),
-      }
-    );
     const tokenData = await tokenRes.json() as { access_token?: string; error?: { message: string } };
 
     if (!tokenData.access_token) {
