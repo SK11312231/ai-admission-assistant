@@ -13,6 +13,7 @@ interface InstituteRow {
   plan: string;
   password_hash: string;
   created_at: string;
+  whatsapp_connected: boolean;
 }
 
 // Password hashing using PBKDF2 (designed for password storage, unlike plain SHA-256)
@@ -103,6 +104,7 @@ router.post('/register', async (req: Request, res: Response) => {
       phone: phone.trim(),
       whatsapp_number: whatsapp_number.trim(),
       plan,
+      whatsapp_connected: false,
     });
   } catch (err) {
     console.error('Registration error:', err);
@@ -142,10 +144,135 @@ router.post('/login', async (req: Request, res: Response) => {
       phone: institute.phone,
       whatsapp_number: institute.whatsapp_number,
       plan: institute.plan,
+      whatsapp_connected: institute.whatsapp_connected ?? false,
     });
   } catch (err) {
     console.error('Login error:', err);
     res.status(500).json({ error: 'Failed to login.' });
+  }
+});
+
+// POST /api/institutes/:id/connect-whatsapp — exchange Embedded Signup code for WhatsApp credentials
+router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { code } = req.body as { code?: string };
+
+  if (!code || typeof code !== 'string') {
+    res.status(400).json({ error: 'code is required.' });
+    return;
+  }
+
+  const appId = process.env.META_APP_ID;
+  const appSecret = process.env.META_APP_SECRET;
+  const systemUserToken = process.env.META_SYSTEM_USER_TOKEN;
+
+  if (!appId || !appSecret) {
+    res.status(500).json({ error: 'META_APP_ID and META_APP_SECRET are not configured on the server.' });
+    return;
+  }
+
+  try {
+    // Step 1: Exchange the short-lived code for an access token using POST to avoid
+    // exposing app credentials in URL query parameters (which could appear in logs)
+    const tokenParams = new URLSearchParams({
+      client_id: appId,
+      client_secret: appSecret,
+      code,
+    });
+    const tokenRes = await fetch(
+      'https://graph.facebook.com/v21.0/oauth/access_token',
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: tokenParams.toString(),
+      }
+    );
+    const tokenData = await tokenRes.json() as { access_token?: string; error?: { message: string } };
+
+    if (!tokenData.access_token) {
+      const msg = tokenData.error?.message ?? 'Failed to exchange code for access token.';
+      res.status(400).json({ error: msg });
+      return;
+    }
+    const userAccessToken = tokenData.access_token;
+
+    // Step 2: Get the WABA ID from debug_token (requires system user token or app token)
+    // Note: input_token is a required query parameter per Meta's Graph API spec
+    const debugTokenRes = await fetch(
+      `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(userAccessToken)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${systemUserToken ?? `${appId}|${appSecret}`}`,
+        },
+      }
+    );
+    const debugData = await debugTokenRes.json() as {
+      data?: {
+        granular_scopes?: Array<{ scope: string; target_ids?: string[] }>;
+      };
+    };
+
+    const wabaId = debugData.data?.granular_scopes
+      ?.find((s) => s.scope === 'whatsapp_business_management')
+      ?.target_ids?.[0];
+
+    if (!wabaId) {
+      res.status(400).json({ error: 'Could not find WhatsApp Business Account in the granted permissions. Make sure whatsapp_business_management permission was granted.' });
+      return;
+    }
+
+    // Step 3: Get phone numbers for this WABA
+    const phoneRes = await fetch(
+      `https://graph.facebook.com/v21.0/${wabaId}/phone_numbers?fields=id,display_phone_number,verified_name`,
+      { headers: { Authorization: `Bearer ${userAccessToken}` } }
+    );
+    const phoneData = await phoneRes.json() as {
+      data?: Array<{ id: string; display_phone_number: string; verified_name?: string }>;
+      error?: { message: string };
+    };
+
+    if (!phoneData.data || phoneData.data.length === 0) {
+      res.status(400).json({ error: 'No phone numbers found in this WhatsApp Business Account.' });
+      return;
+    }
+
+    const phone = phoneData.data[0];
+    const phoneNumberId = phone.id;
+    const displayPhoneNumber = phone.display_phone_number;
+
+    // Step 4: Subscribe this phone number to our webhook
+    const subRes = await fetch(
+      `https://graph.facebook.com/v21.0/${phoneNumberId}/subscribed_apps`,
+      {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${userAccessToken}` },
+      }
+    );
+    if (!subRes.ok) {
+      const subErr = await subRes.text();
+      console.error(`Webhook subscription failed for phone number ${phoneNumberId}: ${subErr}`);
+      // Non-fatal: proceed with saving credentials; the institute can retry later
+    }
+
+    // Step 5: Save to DB
+    await pool.query(
+      `UPDATE institutes
+       SET whatsapp_number = $1,
+           whatsapp_phone_number_id = $2,
+           whatsapp_access_token = $3,
+           whatsapp_connected = TRUE
+       WHERE id = $4`,
+      [displayPhoneNumber, phoneNumberId, userAccessToken, Number(id)]
+    );
+
+    res.json({
+      success: true,
+      whatsapp_number: displayPhoneNumber,
+      phone_number_id: phoneNumberId,
+    });
+  } catch (err) {
+    console.error('WhatsApp connect error:', err);
+    res.status(500).json({ error: 'Failed to connect WhatsApp. Please try again.' });
   }
 });
 

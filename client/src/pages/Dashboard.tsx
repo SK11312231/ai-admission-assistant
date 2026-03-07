@@ -9,6 +9,7 @@ interface Institute {
   phone: string;
   whatsapp_number: string;
   plan: string;
+  whatsapp_connected: boolean;
 }
 
 interface Lead {
@@ -34,6 +35,8 @@ export default function Dashboard() {
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
+  const [connectingWA, setConnectingWA] = useState(false);
+  const [waError, setWaError] = useState<string | null>(null);
 
   useEffect(() => {
     const stored = localStorage.getItem('institute');
@@ -60,6 +63,96 @@ export default function Dashboard() {
 
     void fetchLeads();
   }, [navigate]);
+
+  // Load the Meta/Facebook JS SDK for Embedded Signup
+  useEffect(() => {
+    if (document.getElementById('facebook-jssdk')) return;
+    const script = document.createElement('script');
+    script.id = 'facebook-jssdk';
+    script.src = 'https://connect.facebook.net/en_US/sdk.js';
+    script.async = true;
+    script.defer = true;
+    script.crossOrigin = 'anonymous';
+    document.body.appendChild(script);
+
+    const metaAppId = import.meta.env.VITE_META_APP_ID as string | undefined;
+    if (!metaAppId) {
+      console.warn('VITE_META_APP_ID is not set — WhatsApp Embedded Signup will not work.');
+      return;
+    }
+
+    window.fbAsyncInit = function () {
+      window.FB.init({
+        appId: metaAppId,
+        autoLogAppEvents: true,
+        xfbml: true,
+        version: 'v21.0',
+      });
+    };
+  }, []);
+
+  const handleConnectWhatsApp = async () => {
+    setConnectingWA(true);
+    setWaError(null);
+
+    if (!window.FB) {
+      setWaError('Facebook SDK not loaded. Please refresh the page and try again.');
+      setConnectingWA(false);
+      return;
+    }
+
+    const metaConfigId = import.meta.env.VITE_META_CONFIG_ID as string | undefined;
+    if (!metaConfigId) {
+      setWaError('WhatsApp Embedded Signup is not configured. Please contact support.');
+      setConnectingWA(false);
+      return;
+    }
+
+    window.FB.login(
+      async (response) => {
+        if (!response.authResponse?.code) {
+          setWaError('WhatsApp connection was cancelled or failed.');
+          setConnectingWA(false);
+          return;
+        }
+
+        try {
+          const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ code: response.authResponse.code }),
+          });
+          const data = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
+
+          if (!res.ok || !data.success) {
+            throw new Error(data.error ?? 'Failed to connect WhatsApp.');
+          }
+
+          const updated = {
+            ...institute!,
+            whatsapp_number: data.whatsapp_number ?? institute!.whatsapp_number,
+            whatsapp_connected: true,
+          };
+          setInstitute(updated);
+          localStorage.setItem('institute', JSON.stringify(updated));
+        } catch (err) {
+          setWaError(err instanceof Error ? err.message : 'Something went wrong.');
+        } finally {
+          setConnectingWA(false);
+        }
+      },
+      {
+        config_id: metaConfigId,
+        response_type: 'code',
+        override_default_response_type: true,
+        extras: {
+          setup: {},
+          featureType: '',
+          sessionInfoVersion: '3',
+        },
+      },
+    );
+  };
 
   const updateStatus = async (leadId: number, status: string) => {
     try {
@@ -103,6 +196,30 @@ export default function Dashboard() {
           </p>
         </div>
       </div>
+
+      {/* Connect WhatsApp Banner */}
+      {!institute.whatsapp_connected && (
+        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <p className="font-semibold text-amber-800 text-sm">📱 Connect your WhatsApp Business number</p>
+            <p className="text-amber-700 text-xs mt-1">
+              Connect your WhatsApp Business account so students can reach you and leads are captured automatically.
+            </p>
+          </div>
+          <button
+            onClick={() => void handleConnectWhatsApp()}
+            disabled={connectingWA}
+            className="flex-shrink-0 bg-green-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
+          >
+            {connectingWA ? 'Connecting…' : '🔗 Connect WhatsApp'}
+          </button>
+        </div>
+      )}
+      {waError && (
+        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-6 text-red-700 text-sm">
+          {waError}
+        </div>
+      )}
 
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
@@ -200,3 +317,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

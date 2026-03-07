@@ -33,6 +33,17 @@ export async function initDB(): Promise<void> {
   `);
   console.log('  ✅ institutes table ready');
 
+  // Add WhatsApp Embedded Signup columns (safe to run on existing DBs)
+  await pool.query(`
+    ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_phone_number_id TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT;
+  `);
+  await pool.query(`
+    ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_connected BOOLEAN NOT NULL DEFAULT FALSE;
+  `);
+
   // Create leads table — stores student inquiries received via WhatsApp
   await pool.query(`
     CREATE TABLE IF NOT EXISTS leads (
