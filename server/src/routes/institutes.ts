@@ -33,7 +33,7 @@ function verifyPassword(password: string, stored: string): boolean {
   return computed === hash;
 }
 
-// POST /api/institutes/register — register a new institute
+// POST /api/institutes/register
 router.post('/register', async (req: Request, res: Response) => {
   const { name, email, phone, whatsapp_number, plan, password } = req.body as {
     name?: string;
@@ -44,7 +44,6 @@ router.post('/register', async (req: Request, res: Response) => {
     password?: string;
   };
 
-  // Validation
   if (!name || typeof name !== 'string' || name.trim() === '') {
     res.status(400).json({ error: 'Institute name is required.' });
     return;
@@ -71,7 +70,6 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 
   try {
-    // Check for duplicate email or WhatsApp number
     const existing = await pool.query(
       'SELECT id FROM institutes WHERE email = $1 OR whatsapp_number = $2',
       [email.trim().toLowerCase(), whatsapp_number.trim()]
@@ -112,7 +110,7 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
-// POST /api/institutes/login — authenticate an institute
+// POST /api/institutes/login
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body as { email?: string; password?: string };
 
@@ -172,11 +170,15 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
   }
 
   try {
-    // Step 1: Exchange the short-lived code for an access token using POST to avoid
-    // exposing app credentials in URL query parameters (which could appear in logs)
+    // Step 1: Exchange the short-lived code for an access token.
+    // When FB.login uses response_type:'code', Meta requires redirect_uri in the
+    // token exchange to exactly match the URI used during the OAuth dialogue.
+    // For the JS SDK Embedded Signup flow the implicit redirect_uri is always
+    // https://www.facebook.com/connect/login_success.html
     const tokenParams = new URLSearchParams({
       client_id: appId,
       client_secret: appSecret,
+      redirect_uri: 'https://www.facebook.com/connect/login_success.html',
       code,
     });
     const tokenRes = await fetch(
