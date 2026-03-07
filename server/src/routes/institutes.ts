@@ -153,7 +153,8 @@ router.post('/login', async (req: Request, res: Response) => {
 // POST /api/institutes/:id/connect-whatsapp — exchange Embedded Signup code for WhatsApp credentials
 router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { code } = req.body as { code?: string };
+  // const { code } = req.body as { code?: string };
+  const { code, redirectUri } = req.body as { code?: string; redirectUri?: string };
 
   if (!code || typeof code !== 'string') {
     res.status(400).json({ error: 'code is required.' });
@@ -185,6 +186,11 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
     tokenUrl.searchParams.set('client_id', appId);
     tokenUrl.searchParams.set('client_secret', appSecret);
     tokenUrl.searchParams.set('code', code);
+
+    // ✅ Use the redirect_uri from the frontend (current page URL)
+    if (redirectUri) {
+      tokenUrl.searchParams.set('redirect_uri', redirectUri);
+    }
 
     const tokenRes = await fetch(tokenUrl.toString(), {
       method: 'GET', // ✅ Must be GET, not POST
