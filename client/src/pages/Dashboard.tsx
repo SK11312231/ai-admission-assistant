@@ -153,6 +153,8 @@ export default function Dashboard() {
     // Wrap all async logic in a void IIFE inside the plain callback.
     window.FB.login(
       (response) => {
+        // ADD THIS LINE TEMPORARILY
+        console.log('Full auth response:', JSON.stringify(response));
         void (async () => {
           clearTimeout(timeoutId);
           window.removeEventListener('message', handleMessage);

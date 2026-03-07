@@ -192,10 +192,16 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
       tokenUrl.searchParams.set('redirect_uri', redirectUri);
     }
 
+    // ADD THIS
+    console.log('Token URL being called:', tokenUrl.toString());
+
     const tokenRes = await fetch(tokenUrl.toString(), {
       method: 'GET', // ✅ Must be GET, not POST
     });
     const tokenData = await tokenRes.json() as { access_token?: string; error?: { message: string } };
+
+    // ADD THIS
+    console.log('Token exchange response:', JSON.stringify(tokenData));
 
     if (!tokenData.access_token) {
       const msg = tokenData.error?.message ?? 'Failed to exchange code for access token.';
