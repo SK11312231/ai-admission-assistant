@@ -23,10 +23,13 @@ interface MessageRow {
 let openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
   if (!openai) {
-    if (!process.env.OPENAI_API_KEY) {
-      throw new Error('OPENAI_API_KEY is not set. Please add it to your .env file.');
+    if (!process.env.GROQ_API_KEY) {
+      throw new Error('GROQ_API_KEY is not set. Please add it to your .env file.');
     }
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openai = new OpenAI({
+      apiKey: process.env.GROQ_API_KEY,
+      baseURL: 'https://api.groq.com/openai/v1',
+    });
   }
   return openai;
 }
@@ -94,7 +97,7 @@ router.post('/', async (req: Request, res: Response) => {
     const client = getOpenAI();
     const systemPrompt = await buildSystemPrompt();
     const completion = await client.chat.completions.create({
-      model: 'gpt-4o',
+      model: 'llama-3.3-70b-versatile',
       messages: [
         { role: 'system', content: systemPrompt },
         ...history.map((m) => ({ role: m.role, content: m.content })),
