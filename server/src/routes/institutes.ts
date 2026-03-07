@@ -178,7 +178,6 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
     const tokenParams = new URLSearchParams({
       client_id: appId,
       client_secret: appSecret,
-      redirect_uri: '',
       code,
     });
     const tokenRes = await fetch(
