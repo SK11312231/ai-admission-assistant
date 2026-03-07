@@ -170,8 +170,7 @@ export default function Dashboard() {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: JSON.stringify({ 
-                code: response.authResponse.code,
-                redirectUri: window.location.origin + window.location.pathname,
+                code: response.authResponse.code
                }),
             });
             const data = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
