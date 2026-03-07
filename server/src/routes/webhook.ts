@@ -9,6 +9,8 @@ interface InstituteRow {
   name: string;
   whatsapp_number: string;
   plan: string;
+  whatsapp_access_token: string | null;
+  whatsapp_phone_number_id: string | null;
 }
 
 interface University {
@@ -157,8 +159,9 @@ async function sendWhatsAppMessage(
   phoneNumberId: string,
   toPhone: string,
   text: string,
+  apiTokenOverride?: string,
 ): Promise<void> {
-  const apiToken = process.env.WHATSAPP_API_TOKEN;
+  const apiToken = apiTokenOverride ?? process.env.WHATSAPP_API_TOKEN;
   if (!apiToken) {
     console.warn('WHATSAPP_API_TOKEN is not set — skipping send.');
     return;
@@ -248,9 +251,11 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     if (displayPhone) {
       const normalized = displayPhone.replace(/\D/g, '');
       const result = await pool.query(
-        `SELECT id, name, whatsapp_number, plan FROM institutes
-         WHERE REGEXP_REPLACE(whatsapp_number, '[^0-9]', '', 'g') = $1`,
-        [normalized],
+        `SELECT id, name, whatsapp_number, plan, whatsapp_access_token, whatsapp_phone_number_id
+         FROM institutes
+         WHERE REGEXP_REPLACE(whatsapp_number, '[^0-9]', '', 'g') = $1
+            OR ($2::TEXT IS NOT NULL AND whatsapp_phone_number_id = $2)`,
+        [normalized, businessPhoneId ?? null],
       );
       institute = result.rows[0] as InstituteRow | undefined;
     }
@@ -269,10 +274,15 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     console.log(`✅ Lead created for institute ${institute.id} from ${studentPhone}`);
 
     // 2. Generate an AI reply and send it back on WhatsApp
-    if (businessPhoneId && process.env.WHATSAPP_API_TOKEN) {
+    if (businessPhoneId && (institute.whatsapp_access_token ?? process.env.WHATSAPP_API_TOKEN)) {
       try {
         const replyText = await generateAIReply(institute, studentPhone, messageBody);
-        await sendWhatsAppMessage(businessPhoneId, studentPhone, replyText);
+        await sendWhatsAppMessage(
+          businessPhoneId,
+          studentPhone,
+          replyText,
+          institute.whatsapp_access_token ?? undefined,
+        );
         console.log(`✅ AI reply sent to ${studentPhone}`);
       } catch (aiErr) {
         console.error('AI reply failed, sending fallback:', aiErr);
@@ -280,7 +290,12 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
         const fallback =
           `Hi! Thank you for contacting ${institute.name}. ` +
           `We have received your message and will get back to you shortly.`;
-        await sendWhatsAppMessage(businessPhoneId, studentPhone, fallback).catch(console.error);
+        await sendWhatsAppMessage(
+          businessPhoneId,
+          studentPhone,
+          fallback,
+          institute.whatsapp_access_token ?? undefined,
+        ).catch(console.error);
       }
     } else {
       console.warn(
