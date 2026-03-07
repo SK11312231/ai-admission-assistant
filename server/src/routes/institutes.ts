@@ -178,7 +178,7 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
     const tokenParams = new URLSearchParams({
       client_id: appId,
       client_secret: appSecret,
-      redirect_uri: 'https://ai-admission-assistant-production.up.railway.app/dashboard',
+      redirect_uri: 'https://www.facebook.com/connect/login_success.html',
       code,
     });
     const tokenRes = await fetch(
