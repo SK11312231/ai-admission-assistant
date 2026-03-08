@@ -5,7 +5,7 @@ nixPkgs = ["nodejs_20", "chromium"]
 cmds = ["npm install"]
 
 [phases.build]
-cmds = ["npm run build --workspace=server", "npm run build --workspace=client"]
+cmds = ["which chromium || which chromium-browser || find / -name 'chromium' 2>/dev/null | head -5", "npm run build --workspace=server", "npm run build --workspace=client"]
 
 [start]
 cmd = "node server/dist/index.js"
