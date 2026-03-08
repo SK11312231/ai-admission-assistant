@@ -12,6 +12,7 @@ import webhookRouter from './routes/webhook';
 import chatRouter from './routes/chat';
 
 const app = express();
+app.set('trust proxy', 1); // ← add this line
 const PORT = process.env.PORT ?? 3001;
 
 // Fail fast if DATABASE_URL is not configured
