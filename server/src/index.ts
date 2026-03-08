@@ -7,6 +7,7 @@ import rateLimit from 'express-rate-limit';
 import pool, { initDB } from './db';
 import { seed } from './seed';
 import institutesRouter from './routes/institutes';
+import { restoreAllSessions } from './routes/whatsappManager';
 import leadsRouter from './routes/leads';
 import webhookRouter from './routes/webhook';
 import chatRouter from './routes/chat';
@@ -91,6 +92,7 @@ app.get('*', defaultLimiter, (req, res, next) => {
 (async () => {
   try {
     await initDB();
+    await restoreAllSessions();
     console.log('✅ Database tables initialised.');
 
     app.listen(PORT, () => {
