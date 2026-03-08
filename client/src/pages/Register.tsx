@@ -9,6 +9,7 @@ export default function Register() {
     email: '',
     phone: '',
     whatsapp_number: '',
+    website: '',
     plan: 'free',
     password: '',
   });
@@ -37,7 +38,6 @@ export default function Register() {
         throw new Error(data.error ?? 'Registration failed.');
       }
 
-      // Store institute info and redirect to dashboard
       localStorage.setItem('institute', JSON.stringify(data));
       navigate('/dashboard');
     } catch (err) {
@@ -71,12 +71,8 @@ export default function Register() {
                 Institute Name
               </label>
               <input
-                id="name"
-                name="name"
-                type="text"
-                required
-                value={form.name}
-                onChange={handleChange}
+                id="name" name="name" type="text" required
+                value={form.name} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="e.g. ABC Coaching Center"
               />
@@ -87,12 +83,8 @@ export default function Register() {
                 Official Email
               </label>
               <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                value={form.email}
-                onChange={handleChange}
+                id="email" name="email" type="email" required
+                value={form.email} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="contact@institute.com"
               />
@@ -103,12 +95,8 @@ export default function Register() {
                 Phone Number
               </label>
               <input
-                id="phone"
-                name="phone"
-                type="tel"
-                required
-                value={form.phone}
-                onChange={handleChange}
+                id="phone" name="phone" type="tel" required
+                value={form.phone} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="+91 9876543210"
               />
@@ -119,15 +107,27 @@ export default function Register() {
                 WhatsApp Number
               </label>
               <input
-                id="whatsapp_number"
-                name="whatsapp_number"
-                type="tel"
-                required
-                value={form.whatsapp_number}
-                onChange={handleChange}
+                id="whatsapp_number" name="whatsapp_number" type="tel" required
+                value={form.whatsapp_number} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="+91 9876543210"
               />
+            </div>
+
+            <div>
+              <label htmlFor="website" className="block text-sm font-medium text-gray-700 mb-1">
+                Institute Website
+                <span className="text-gray-400 font-normal ml-1">(optional)</span>
+              </label>
+              <input
+                id="website" name="website" type="url"
+                value={form.website} onChange={handleChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                placeholder="https://www.yourinstitute.com"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                We'll use this to auto-generate your AI assistant's knowledge base.
+              </p>
             </div>
 
             <div>
@@ -135,10 +135,8 @@ export default function Register() {
                 Plan
               </label>
               <select
-                id="plan"
-                name="plan"
-                value={form.plan}
-                onChange={handleChange}
+                id="plan" name="plan"
+                value={form.plan} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white"
               >
                 <option value="free">Free</option>
@@ -152,21 +150,15 @@ export default function Register() {
                 Password
               </label>
               <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                minLength={6}
-                value={form.password}
-                onChange={handleChange}
+                id="password" name="password" type="password" required minLength={6}
+                value={form.password} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="Min 6 characters"
               />
             </div>
 
             <button
-              type="submit"
-              disabled={loading}
+              type="submit" disabled={loading}
               className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm mt-2"
             >
               {loading ? 'Registering…' : 'Register'}
