@@ -197,7 +197,7 @@ export default function Dashboard() {
     // Secondary path: use wabaId+phoneNumberId from the WA_EMBEDDED_SIGNUP FINISH postMessage above.
     window.FB.login(
       (response) => {
-        console.log('FB.login response:', JSON.stringify(response));
+        console.log('FB.login response:', window.location.origin);
 
         if (response.authResponse?.code) {
           // Primary path: exchange the code server-side for an access token.

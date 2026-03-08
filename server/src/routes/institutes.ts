@@ -153,6 +153,8 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
     redirectUri?: string;  // ← add this
   };
 
+  console.log('Connect WhatsApp request body:', JSON.stringify(req.body));
+
   const appId = process.env.META_APP_ID;
   const appSecret = process.env.META_APP_SECRET;
 
