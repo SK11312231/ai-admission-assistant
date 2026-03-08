@@ -1,11 +1,8 @@
-// At top of file, add this constant
-const WA_DATA_PATH = '/tmp/wwebjs_auth';
 import { Client, RemoteAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { getInstituteDetails } from './instituteEnrichment';
 import { Pool } from 'pg';
-
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,6 +18,10 @@ interface MessageRow {
   role: 'user' | 'assistant';
   content: string;
 }
+
+// ── Constants ────────────────────────────────────────────────────────────────
+
+const WA_DATA_PATH = '/tmp/wwebjs_auth';
 
 // ── In-memory session store ──────────────────────────────────────────────────
 
@@ -41,8 +42,6 @@ function getOpenAI(): OpenAI {
 }
 
 // ── PostgreSQL RemoteAuth Store ──────────────────────────────────────────────
-// Implements the interface whatsapp-web.js RemoteAuth expects.
-// Stores the zipped session as base64 in a DB table.
 
 class PostgresStore {
   private pool: Pool;
@@ -62,10 +61,9 @@ class PostgresStore {
 
   async save(options: { session: string }): Promise<void> {
     await this.ensureTable();
-    // whatsapp-web.js saves session zip to /tmp/{session}.zip — read and store as base64
     const fs = await import('fs/promises');
-    const path = await import('path');
-    const zipPath = path.join(WA_DATA_PATH, `${options.session}.zip`); 
+    // RemoteAuth saves the zip directly inside WA_DATA_PATH
+    const zipPath = `${WA_DATA_PATH}/${options.session}.zip`;
     try {
       const data = await fs.readFile(zipPath);
       const base64 = data.toString('base64');
@@ -82,7 +80,7 @@ class PostgresStore {
     }
   }
 
-  async extract(options: { session: string, path: string }): Promise<void> {
+  async extract(options: { session: string; path: string }): Promise<void> {
     await this.ensureTable();
     const result = await this.pool.query(
       `SELECT session_data FROM whatsapp_sessions WHERE session_id = $1`,
@@ -93,9 +91,18 @@ class PostgresStore {
       return;
     }
     const fs = await import('fs/promises');
+    const fssync = await import('fs');
     const path = await import('path');
+
+    // Ensure the directory exists
+    const dir = path.dirname(options.path);
+    if (!fssync.existsSync(dir)) {
+      await fs.mkdir(dir, { recursive: true });
+    }
+
     const base64 = result.rows[0].session_data as string;
-    const zipPath = path.join(WA_DATA_PATH, `${options.session}.zip`);
+    // options.path is the full path without .zip — RemoteAuth expects the zip here
+    const zipPath = `${options.path}.zip`;
     await fs.writeFile(zipPath, Buffer.from(base64, 'base64'));
     console.log(`[WA Store] Session extracted: ${options.session} → ${zipPath}`);
   }
@@ -120,14 +127,13 @@ class PostgresStore {
   }
 }
 
-// Single shared store instance
 let store: PostgresStore | null = null;
 function getStore(): PostgresStore {
   if (!store) store = new PostgresStore(pool);
   return store;
 }
 
-// ── Save lead ────────────────────────────────────────────────────────────────
+// ── Save lead (self-contained) ───────────────────────────────────────────────
 
 async function saveLead(
   instituteId: number,
@@ -150,13 +156,17 @@ async function saveLead(
         [message, existing.rows[0].id],
       );
     } else {
+      // Try to extract student name — keep max_tokens small, no history needed
       let studentName: string | null = null;
       try {
         const client = getOpenAI();
         const completion = await client.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [
-            { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
+            {
+              role: 'system',
+              content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.',
+            },
             { role: 'user', content: message },
           ],
           temperature: 0,
@@ -184,12 +194,13 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
   try {
     const instResult = await pool.query('SELECT name FROM institutes WHERE id = $1', [instituteId]);
     const instituteName: string = instResult.rows[0]?.name ?? 'this institute';
+
     let instituteData: string | null = null;
     try { instituteData = await getInstituteDetails(instituteId); } catch { /* non-fatal */ }
 
     const contextSection = instituteData
       ? `You have the following detailed information about ${instituteName}:\n\n${instituteData}`
-      : `You are representing ${instituteName}. Detailed profile information is not yet available.`;
+      : `You are representing ${instituteName}. Detailed profile information is not yet available. Answer general admission-related questions helpfully.`;
 
     return (
       `You are an AI admission assistant for ${instituteName}. ` +
@@ -220,13 +231,15 @@ async function getAIReply(
   try {
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
+    // Save user message to history
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
       [sessionId, 'user', messageText.trim()],
     );
 
+    // Load last 10 messages only to avoid token limit issues
     const historyResult = await pool.query(
-      'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 20',
+      'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 10',
       [sessionId],
     );
     const history = historyResult.rows as MessageRow[];
@@ -243,12 +256,14 @@ async function getAIReply(
         ...history.map((m) => ({ role: m.role, content: m.content })),
       ],
       temperature: 0.7,
-      max_tokens: 600,
+      max_tokens: 1024,
     });
 
-    const reply = completion.choices[0]?.message?.content ?? 'Sorry, I could not generate a response.';
+    // Use || instead of ?? to also catch empty string responses
+    const reply = completion.choices[0]?.message?.content?.trim() || 'Sorry, I could not generate a response.';
     console.log(`[WA] Groq reply received (${reply.length} chars)`);
 
+    // Save assistant reply to history
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
       [sessionId, 'assistant', reply],
@@ -261,7 +276,7 @@ async function getAIReply(
   }
 }
 
-// ── Puppeteer client factory with RemoteAuth ─────────────────────────────────
+// ── Puppeteer client factory ─────────────────────────────────────────────────
 
 function makeClient(instituteId: string): Client {
   return new Client({
@@ -269,7 +284,7 @@ function makeClient(instituteId: string): Client {
       clientId: `institute-${instituteId}`,
       store: getStore(),
       dataPath: WA_DATA_PATH,
-      backupSyncIntervalMs: 300_000, // save session every 5 minutes
+      backupSyncIntervalMs: 300_000,
     }),
     puppeteer: {
       args: [
@@ -344,11 +359,12 @@ export async function initSession(instituteId: string): Promise<void> {
     try {
       console.log(`[WA] Calling getAIReply...`);
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
-      console.log(`[WA] getAIReply returned: ${reply ? reply.slice(0, 50) : 'NULL'}`);  // ← add this
+      console.log(`[WA] getAIReply returned: ${reply ? reply.slice(0, 80) : 'NULL'}`);
       if (!reply) {
         console.error(`[WA] No reply generated`);
         return;
       }
+      console.log(`[WA] Sending reply...`);
       await client.sendMessage(msg.from, reply);
       console.log(`[WA] ===== REPLY SENT =====`);
     } catch (err) {
