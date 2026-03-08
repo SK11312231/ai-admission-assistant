@@ -1,6 +1,12 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
+import qrcode from 'qrcode';
 import pool from '../db';
+import {
+  initSession,
+  getSessionState,
+  disconnectSession,
+} from './whatsappManager';
 
 const router = Router();
 
@@ -142,93 +148,48 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // POST /api/institutes/:id/connect-whatsapp
-// Receives wabaId + phoneNumberId from the WA_EMBEDDED_SIGNUP FINISH postMessage on the frontend.
-// Uses META_SYSTEM_USER_TOKEN to fetch phone number details and save to DB.
+// Starts a whatsapp-web.js session for the institute.
+// Frontend polls GET /:id/whatsapp-status for QR + connection state.
 router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { wabaId, phoneNumberId } = req.body as {
-    wabaId?: string;
-    phoneNumberId?: string;
-  };
-
-  console.log('Connect WhatsApp request body:', JSON.stringify(req.body));
-
-  if (!wabaId || typeof wabaId !== 'string' || wabaId.trim() === '') {
-    res.status(400).json({ error: 'wabaId is required.' });
-    return;
-  }
-  if (!phoneNumberId || typeof phoneNumberId !== 'string' || phoneNumberId.trim() === '') {
-    res.status(400).json({ error: 'phoneNumberId is required.' });
-    return;
-  }
-
-  const systemUserToken = process.env.META_SYSTEM_USER_TOKEN;
-  if (!systemUserToken) {
-    res.status(500).json({ error: 'META_SYSTEM_USER_TOKEN is not configured on the server.' });
-    return;
-  }
-
   try {
-    // Fetch phone number details using system user token
-    const phoneRes = await fetch(
-      `https://graph.facebook.com/v21.0/${phoneNumberId.trim()}?fields=id,display_phone_number,verified_name`,
-      { headers: { Authorization: `Bearer ${systemUserToken}` } },
-    );
-    const phoneData = await phoneRes.json() as {
-      id?: string;
-      display_phone_number?: string;
-      verified_name?: string;
-      error?: { message: string };
-    };
-
-    console.log('Phone number fetch response:', JSON.stringify(phoneData));
-
-    if (!phoneRes.ok || phoneData.error) {
-      res.status(400).json({ error: phoneData.error?.message ?? 'Failed to fetch phone number details.' });
-      return;
-    }
-
-    if (!phoneData.display_phone_number) {
-      res.status(400).json({ error: 'Phone number details are missing from Meta response.' });
-      return;
-    }
-
-    const displayPhoneNumber = phoneData.display_phone_number;
-
-    // Subscribe phone number to our webhook (non-fatal if it fails)
-    const subRes = await fetch(
-      `https://graph.facebook.com/v21.0/${phoneNumberId.trim()}/subscribed_apps`,
-      {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${systemUserToken}` },
-      },
-    );
-    if (!subRes.ok) {
-      const subErr = await subRes.text();
-      console.error(`Webhook subscription failed for phone number ${phoneNumberId}: ${subErr}`);
-    }
-
-    // Save to DB
-    await pool.query(
-      `UPDATE institutes
-       SET whatsapp_number = $1,
-           whatsapp_phone_number_id = $2,
-           whatsapp_waba_id = $3,
-           whatsapp_access_token = $4,
-           whatsapp_connected = TRUE
-       WHERE id = $5`,
-      [displayPhoneNumber, phoneNumberId.trim(), wabaId.trim(), systemUserToken, Number(id)],
-    );
-
-    res.json({
-      success: true,
-      whatsapp_number: displayPhoneNumber,
-      phone_number_id: phoneNumberId.trim(),
-      waba_id: wabaId.trim(),
-    });
+    void initSession(id);
+    res.json({ started: true });
   } catch (err) {
-    console.error('WhatsApp connect error:', err);
-    res.status(500).json({ error: 'Failed to connect WhatsApp. Please try again.' });
+    console.error('Connect WhatsApp error:', err);
+    res.status(500).json({ error: 'Failed to start WhatsApp session.' });
+  }
+});
+
+// GET /api/institutes/:id/whatsapp-status
+// Returns current session status and QR code as a base64 PNG data URL.
+router.get('/:id/whatsapp-status', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    const { status, qr } = getSessionState(id);
+
+    let qrDataUrl: string | null = null;
+    if (qr) {
+      qrDataUrl = await qrcode.toDataURL(qr, { width: 300, margin: 2 });
+    }
+
+    res.json({ status, qr: qrDataUrl });
+  } catch (err) {
+    console.error('WhatsApp status error:', err);
+    res.status(500).json({ error: 'Failed to get WhatsApp status.' });
+  }
+});
+
+// DELETE /api/institutes/:id/disconnect-whatsapp
+// Disconnects and removes the WhatsApp session.
+router.delete('/:id/disconnect-whatsapp', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    await disconnectSession(id);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Disconnect WhatsApp error:', err);
+    res.status(500).json({ error: 'Failed to disconnect WhatsApp.' });
   }
 });
 
