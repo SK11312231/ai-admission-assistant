@@ -172,6 +172,7 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
         client_id: appId,
         client_secret: appSecret,
         code,
+        redirect_uri: process.env.CLIENT_URL?.replace(/\/$/, '') + '/',
       });
 
       const tokenRes = await fetch('https://graph.facebook.com/v21.0/oauth/access_token', {
