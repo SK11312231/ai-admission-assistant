@@ -146,10 +146,11 @@ router.post('/login', async (req: Request, res: Response) => {
 // Secondary path: receive wabaId + phoneNumberId directly from WA_EMBEDDED_SIGNUP FINISH postMessage.
 router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { code, wabaId, phoneNumberId } = req.body as {
+  const { code, wabaId, phoneNumberId, redirectUri } = req.body as {  // ← add redirectUri
     code?: string;
     wabaId?: string;
     phoneNumberId?: string;
+    redirectUri?: string;  // ← add this
   };
 
   const appId = process.env.META_APP_ID;
@@ -172,7 +173,7 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
         client_id: appId,
         client_secret: appSecret,
         code,
-        redirect_uri: process.env.CLIENT_URL?.replace(/\/$/, '') + '/',
+        redirect_uri: redirectUri ?? process.env.CLIENT_URL?.replace(/\/$/, '') + '/',
       });
 
       const tokenRes = await fetch('https://graph.facebook.com/v21.0/oauth/access_token', {

@@ -211,7 +211,10 @@ export default function Dashboard() {
               const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ code: response.authResponse!.code }),
+                body: JSON.stringify({ 
+                  code: response.authResponse!.code,
+                  redirectUri: window.location.origin + '/',  // ← ADD THIS
+                }),
               });
               const resData = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
 
