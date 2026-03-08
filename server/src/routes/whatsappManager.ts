@@ -1,8 +1,11 @@
+// At top of file, add this constant
+const WA_DATA_PATH = '/tmp/wwebjs_auth';
 import { Client, RemoteAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { getInstituteDetails } from './instituteEnrichment';
 import { Pool } from 'pg';
+
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,7 +65,7 @@ class PostgresStore {
     // whatsapp-web.js saves session zip to /tmp/{session}.zip — read and store as base64
     const fs = await import('fs/promises');
     const path = await import('path');
-    const zipPath = path.join('/tmp', `${options.session}.zip`);
+    const zipPath = path.join(WA_DATA_PATH, `${options.session}.zip`); 
     try {
       const data = await fs.readFile(zipPath);
       const base64 = data.toString('base64');
@@ -92,7 +95,7 @@ class PostgresStore {
     const fs = await import('fs/promises');
     const path = await import('path');
     const base64 = result.rows[0].session_data as string;
-    const zipPath = path.join('/tmp', `${options.session}.zip`);
+    const zipPath = path.join(WA_DATA_PATH, `${options.session}.zip`);
     await fs.writeFile(zipPath, Buffer.from(base64, 'base64'));
     console.log(`[WA Store] Session extracted: ${options.session} → ${zipPath}`);
   }
@@ -265,6 +268,7 @@ function makeClient(instituteId: string): Client {
     authStrategy: new RemoteAuth({
       clientId: `institute-${instituteId}`,
       store: getStore(),
+      dataPath: WA_DATA_PATH,
       backupSyncIntervalMs: 300_000, // save session every 5 minutes
     }),
     puppeteer: {
@@ -338,12 +342,13 @@ export async function initSession(instituteId: string): Promise<void> {
     void saveLead(Number(instituteId), studentPhone, messageText);
 
     try {
+      console.log(`[WA] Calling getAIReply...`);
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
+      console.log(`[WA] getAIReply returned: ${reply ? reply.slice(0, 50) : 'NULL'}`);  // ← add this
       if (!reply) {
         console.error(`[WA] No reply generated`);
         return;
       }
-      console.log(`[WA] Sending reply...`);
       await client.sendMessage(msg.from, reply);
       console.log(`[WA] ===== REPLY SENT =====`);
     } catch (err) {
