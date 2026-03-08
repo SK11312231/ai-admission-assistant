@@ -108,14 +108,17 @@ export default function Dashboard() {
       return;
     }
 
-    // Safety timeout
-    const timeoutId = setTimeout(() => {
-      window.removeEventListener('message', handleMessage);
-      setConnectingWA(false);
-    }, 2 * 60 * 1000);
-
-    // Guard to prevent double-processing if both paths fire (FINISH + FB.login code).
     let handled = false;
+
+    // Safety timeout — 5 minutes
+    const timeoutId = setTimeout(() => {
+      if (!handled) {
+        handled = true;
+        window.removeEventListener('message', handleMessage);
+        setWaError('Connection timed out. Please try again.');
+        setConnectingWA(false);
+      }
+    }, 5 * 60 * 1000);
 
     const handleMessage = (event: MessageEvent) => {
       if (
@@ -130,90 +133,51 @@ export default function Dashboard() {
 
         console.log('WA Embedded Signup postMessage:', JSON.stringify(data));
 
-        if (data.type === 'WA_EMBEDDED_SIGNUP') {
-          if (data.event === 'CANCEL') {
-            clearTimeout(timeoutId);
-            window.removeEventListener('message', handleMessage);
-            setWaError('WhatsApp connection was cancelled.');
-            setConnectingWA(false);
-          } else if (data.event === 'ERROR') {
-            clearTimeout(timeoutId);
-            window.removeEventListener('message', handleMessage);
-            setWaError('An error occurred during WhatsApp signup.');
-            setConnectingWA(false);
-          } else if (data.event === 'FINISH') {
-            // ✅ Extract waba_id and phone_number_id directly from postMessage
-            const finishData = data.data as { waba_id?: string; phone_number_id?: string } | undefined;
-            console.log('FINISH data:', JSON.stringify(finishData));
+        if (data.type !== 'WA_EMBEDDED_SIGNUP') return;
 
-            if (finishData?.waba_id && finishData?.phone_number_id) {
-              if (handled) return;
-              handled = true;
-              clearTimeout(timeoutId);
-              window.removeEventListener('message', handleMessage);
-
-              // Secondary path: send waba_id + phone_number_id to backend
-              void (async () => {
-                try {
-                  const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      wabaId: finishData.waba_id,
-                      phoneNumberId: finishData.phone_number_id,
-                    }),
-                  });
-                  const resData = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
-
-                  if (!res.ok || !resData.success) {
-                    throw new Error(resData.error ?? 'Failed to connect WhatsApp.');
-                  }
-
-                  const updated = {
-                    ...institute!,
-                    whatsapp_number: resData.whatsapp_number ?? institute!.whatsapp_number,
-                    whatsapp_connected: true,
-                  };
-                  setInstitute(updated);
-                  localStorage.setItem('institute', JSON.stringify(updated));
-                } catch (err) {
-                  setWaError(err instanceof Error ? err.message : 'Something went wrong.');
-                } finally {
-                  setConnectingWA(false);
-                }
-              })();
-            }
-          }
-        }
-      } catch {
-        // ignore parse errors from non-JSON messages
-      }
-    };
-
-    window.addEventListener('message', handleMessage);
-
-    // FB.login triggers the Embedded Signup popup.
-    // Primary path: use authResponse.code from this callback.
-    // Secondary path: use wabaId+phoneNumberId from the WA_EMBEDDED_SIGNUP FINISH postMessage above.
-    window.FB.login(
-      (response) => {
-        console.log('FB.login response:', window.location.origin);
-
-        if (response.authResponse?.code) {
-          // Primary path: exchange the code server-side for an access token.
+        if (data.event === 'CANCEL') {
+          if (handled) return;
+          handled = true;
           clearTimeout(timeoutId);
           window.removeEventListener('message', handleMessage);
-          if (handled) return; // FINISH postMessage already handled it
+          setWaError('WhatsApp connection was cancelled.');
+          setConnectingWA(false);
+
+        } else if (data.event === 'ERROR') {
+          if (handled) return;
           handled = true;
+          clearTimeout(timeoutId);
+          window.removeEventListener('message', handleMessage);
+          setWaError('An error occurred during WhatsApp signup. Please try again.');
+          setConnectingWA(false);
+
+        } else if (data.event === 'FINISH') {
+          const finishData = data.data as { waba_id?: string; phone_number_id?: string } | undefined;
+          console.log('FINISH data:', JSON.stringify(finishData));
+
+          if (!finishData?.waba_id || !finishData?.phone_number_id) {
+            if (handled) return;
+            handled = true;
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handleMessage);
+            setWaError('WhatsApp signup completed but account details are missing. Please try again.');
+            setConnectingWA(false);
+            return;
+          }
+
+          if (handled) return;
+          handled = true;
+          clearTimeout(timeoutId);
+          window.removeEventListener('message', handleMessage);
 
           void (async () => {
             try {
               const res = await fetch(apiUrl(`/api/institutes/${institute!.id}/connect-whatsapp`), {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ 
-                  code: response.authResponse!.code,
-                  redirectUri: window.location.origin + '/',  // ← ADD THIS
+                body: JSON.stringify({
+                  wabaId: finishData.waba_id,
+                  phoneNumberId: finishData.phone_number_id,
                 }),
               });
               const resData = await res.json() as { success?: boolean; whatsapp_number?: string; error?: string };
@@ -235,15 +199,22 @@ export default function Dashboard() {
               setConnectingWA(false);
             }
           })();
-        } else {
-          // No code → user cancelled or flow failed.
-          clearTimeout(timeoutId);
-          window.removeEventListener('message', handleMessage);
-          if (!handled) {
-            setWaError('WhatsApp connection was cancelled or failed. Please try again.');
-            setConnectingWA(false);
-          }
         }
+      } catch {
+        // ignore parse errors from non-JSON messages
+      }
+    };
+
+    window.addEventListener('message', handleMessage);
+
+    // FB.login opens the Embedded Signup popup.
+    // We rely entirely on the WA_EMBEDDED_SIGNUP FINISH postMessage above —
+    // NOT on the FB.login callback code, which causes redirect_uri validation errors.
+    window.FB.login(
+      () => {
+        // Intentionally empty — all handling is done via postMessage above.
+        // The FB.login callback 'code' is unreliable for Embedded Signup and
+        // causes "Error validating verification code" errors. Do not use it.
       },
       {
         config_id: metaConfigId,

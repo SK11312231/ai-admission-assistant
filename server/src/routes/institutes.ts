@@ -142,167 +142,70 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // POST /api/institutes/:id/connect-whatsapp
-// Primary path: receive OAuth `code` from FB.login callback and exchange it for an access token.
-// Secondary path: receive wabaId + phoneNumberId directly from WA_EMBEDDED_SIGNUP FINISH postMessage.
+// Receives wabaId + phoneNumberId from the WA_EMBEDDED_SIGNUP FINISH postMessage on the frontend.
+// Uses META_SYSTEM_USER_TOKEN to fetch phone number details and save to DB.
 router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { code, wabaId, phoneNumberId, redirectUri } = req.body as {  // ← add redirectUri
-    code?: string;
+  const { wabaId, phoneNumberId } = req.body as {
     wabaId?: string;
     phoneNumberId?: string;
-    redirectUri?: string;  // ← add this
   };
 
   console.log('Connect WhatsApp request body:', JSON.stringify(req.body));
 
-  const appId = process.env.META_APP_ID;
-  const appSecret = process.env.META_APP_SECRET;
+  if (!wabaId || typeof wabaId !== 'string' || wabaId.trim() === '') {
+    res.status(400).json({ error: 'wabaId is required.' });
+    return;
+  }
+  if (!phoneNumberId || typeof phoneNumberId !== 'string' || phoneNumberId.trim() === '') {
+    res.status(400).json({ error: 'phoneNumberId is required.' });
+    return;
+  }
 
-  if (!appId || !appSecret) {
-    res.status(500).json({ error: 'META_APP_ID and META_APP_SECRET are not configured.' });
+  const systemUserToken = process.env.META_SYSTEM_USER_TOKEN;
+  if (!systemUserToken) {
+    res.status(500).json({ error: 'META_SYSTEM_USER_TOKEN is not configured on the server.' });
     return;
   }
 
   try {
-    let accessToken: string;
-    let resolvedWabaId: string;
-    let resolvedPhoneNumberId: string;
-    let displayPhoneNumber: string;
+    // Fetch phone number details using system user token
+    const phoneRes = await fetch(
+      `https://graph.facebook.com/v21.0/${phoneNumberId.trim()}?fields=id,display_phone_number,verified_name`,
+      { headers: { Authorization: `Bearer ${systemUserToken}` } },
+    );
+    const phoneData = await phoneRes.json() as {
+      id?: string;
+      display_phone_number?: string;
+      verified_name?: string;
+      error?: { message: string };
+    };
 
-    if (code && typeof code === 'string') {
-      // ── Primary path: exchange code for access token (no redirect_uri) ──────
-      const tokenParams = new URLSearchParams({
-        client_id: appId,
-        client_secret: appSecret,
-        code,
-        redirect_uri: redirectUri ?? process.env.CLIENT_URL?.replace(/\/$/, '') + '/',
-      });
+    console.log('Phone number fetch response:', JSON.stringify(phoneData));
 
-      const tokenRes = await fetch('https://graph.facebook.com/v21.0/oauth/access_token', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-        body: tokenParams.toString(),
-      });
-      const tokenData = await tokenRes.json() as {
-        access_token?: string;
-        error?: { message: string };
-      };
-
-      console.log('Token exchange response:', JSON.stringify(tokenData));
-
-      if (!tokenRes.ok || !tokenData.access_token) {
-        res.status(400).json({ error: tokenData.error?.message ?? 'Failed to exchange code for access token.' });
-        return;
-      }
-
-      accessToken = tokenData.access_token;
-
-      // Get WABA ID via debug_token → granular_scopes
-      const debugRes = await fetch(
-        `https://graph.facebook.com/v21.0/debug_token?input_token=${encodeURIComponent(accessToken)}&access_token=${encodeURIComponent(`${appId}|${appSecret}`)}`,
-      );
-      const debugData = await debugRes.json() as {
-        data?: {
-          granular_scopes?: Array<{ scope: string; target_ids?: string[] }>;
-        };
-        error?: { message: string };
-      };
-
-      console.log('debug_token response:', JSON.stringify(debugData));
-
-      if (!debugRes.ok || debugData.error) {
-        res.status(400).json({ error: debugData.error?.message ?? 'Failed to inspect access token.' });
-        return;
-      }
-
-      const wabaScope = debugData.data?.granular_scopes?.find(
-        (s) => s.scope === 'whatsapp_business_management',
-      );
-      resolvedWabaId = wabaScope?.target_ids?.[0] ?? '';
-
-      if (!resolvedWabaId) {
-        res.status(400).json({ error: 'Could not determine WhatsApp Business Account ID from token.' });
-        return;
-      }
-
-      // Get phone number details from WABA
-      const phoneNumRes = await fetch(
-        `https://graph.facebook.com/v21.0/${resolvedWabaId}/phone_numbers?fields=id,display_phone_number`,
-        { headers: { Authorization: `Bearer ${accessToken}` } },
-      );
-      const phoneNumData = await phoneNumRes.json() as {
-        data?: Array<{ id: string; display_phone_number: string }>;
-        error?: { message: string };
-      };
-
-      console.log('Phone numbers response:', JSON.stringify(phoneNumData));
-
-      if (!phoneNumRes.ok || phoneNumData.error) {
-        res.status(400).json({ error: phoneNumData.error?.message ?? 'Failed to fetch phone numbers.' });
-        return;
-      }
-
-      const phoneEntry = phoneNumData.data?.[0];
-      if (!phoneEntry) {
-        res.status(400).json({ error: 'No phone numbers found in WhatsApp Business Account.' });
-        return;
-      }
-
-      resolvedPhoneNumberId = phoneEntry.id;
-      displayPhoneNumber = phoneEntry.display_phone_number;
-    } else if (wabaId && typeof wabaId === 'string' && phoneNumberId && typeof phoneNumberId === 'string') {
-      // ── Secondary path: wabaId + phoneNumberId from FINISH postMessage ────────
-      const systemUserToken = process.env.META_SYSTEM_USER_TOKEN;
-      if (!systemUserToken) {
-        res.status(500).json({ error: 'META_SYSTEM_USER_TOKEN is not configured.' });
-        return;
-      }
-
-      accessToken = systemUserToken;
-      resolvedWabaId = wabaId;
-      resolvedPhoneNumberId = phoneNumberId;
-
-      const phoneRes = await fetch(
-        `https://graph.facebook.com/v21.0/${phoneNumberId}?fields=id,display_phone_number,verified_name`,
-        { headers: { Authorization: `Bearer ${systemUserToken}` } },
-      );
-      const phoneData = await phoneRes.json() as {
-        id?: string;
-        display_phone_number?: string;
-        verified_name?: string;
-        error?: { message: string };
-      };
-
-      console.log('Phone number fetch response:', JSON.stringify(phoneData));
-
-      if (phoneData.error) {
-        res.status(400).json({ error: phoneData.error.message });
-        return;
-      }
-
-      if (!phoneData.display_phone_number) {
-        res.status(400).json({ error: 'Could not fetch phone number details.' });
-        return;
-      }
-
-      displayPhoneNumber = phoneData.display_phone_number;
-    } else {
-      res.status(400).json({ error: 'Either code or wabaId+phoneNumberId is required.' });
+    if (!phoneRes.ok || phoneData.error) {
+      res.status(400).json({ error: phoneData.error?.message ?? 'Failed to fetch phone number details.' });
       return;
     }
 
-    // Subscribe phone number to our webhook
+    if (!phoneData.display_phone_number) {
+      res.status(400).json({ error: 'Phone number details are missing from Meta response.' });
+      return;
+    }
+
+    const displayPhoneNumber = phoneData.display_phone_number;
+
+    // Subscribe phone number to our webhook (non-fatal if it fails)
     const subRes = await fetch(
-      `https://graph.facebook.com/v21.0/${resolvedPhoneNumberId}/subscribed_apps`,
+      `https://graph.facebook.com/v21.0/${phoneNumberId.trim()}/subscribed_apps`,
       {
         method: 'POST',
-        headers: { Authorization: `Bearer ${accessToken}` },
+        headers: { Authorization: `Bearer ${systemUserToken}` },
       },
     );
     if (!subRes.ok) {
       const subErr = await subRes.text();
-      console.error(`Webhook subscription failed for phone number ${resolvedPhoneNumberId}: ${subErr}`);
-      // Non-fatal: proceed with saving
+      console.error(`Webhook subscription failed for phone number ${phoneNumberId}: ${subErr}`);
     }
 
     // Save to DB
@@ -314,14 +217,14 @@ router.post('/:id/connect-whatsapp', async (req: Request, res: Response) => {
            whatsapp_access_token = $4,
            whatsapp_connected = TRUE
        WHERE id = $5`,
-      [displayPhoneNumber, resolvedPhoneNumberId, resolvedWabaId, accessToken, Number(id)],
+      [displayPhoneNumber, phoneNumberId.trim(), wabaId.trim(), systemUserToken, Number(id)],
     );
 
     res.json({
       success: true,
       whatsapp_number: displayPhoneNumber,
-      phone_number_id: resolvedPhoneNumberId,
-      waba_id: resolvedWabaId,
+      phone_number_id: phoneNumberId.trim(),
+      waba_id: wabaId.trim(),
     });
   } catch (err) {
     console.error('WhatsApp connect error:', err);
