@@ -2,6 +2,7 @@ import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { getInstituteDetails } from './instituteEnrichment';
+import { createLeadFromWhatsApp } from './leads';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -36,17 +37,11 @@ function getOpenAI(): OpenAI {
   return openai;
 }
 
-// ── Build system prompt using institute_details ──────────────────────────────
+// ── Build institute-specific system prompt ───────────────────────────────────
 
 async function buildSystemPrompt(instituteId: number): Promise<string> {
-  // Fetch institute name
-  const instResult = await pool.query(
-    'SELECT name FROM institutes WHERE id = $1',
-    [instituteId],
-  );
+  const instResult = await pool.query('SELECT name FROM institutes WHERE id = $1', [instituteId]);
   const instituteName: string = instResult.rows[0]?.name ?? 'this institute';
-
-  // Fetch enriched institute profile
   const instituteData = await getInstituteDetails(instituteId);
 
   const contextSection = instituteData
@@ -68,21 +63,6 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
   );
 }
 
-// ── Save lead to DB ──────────────────────────────────────────────────────────
-
-async function saveLead(instituteId: number, studentPhone: string, message: string): Promise<void> {
-  try {
-    await pool.query(
-      `INSERT INTO leads (institute_id, student_phone, message, status)
-       VALUES ($1, $2, $3, 'new')
-       ON CONFLICT DO NOTHING`,
-      [instituteId, studentPhone, message],
-    );
-  } catch (err) {
-    console.error(`[WA] Failed to save lead for institute ${instituteId}:`, err);
-  }
-}
-
 // ── Generate AI reply ────────────────────────────────────────────────────────
 
 async function getAIReply(
@@ -93,22 +73,18 @@ async function getAIReply(
   try {
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
-    // Persist student message
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
       [sessionId, 'user', messageText.trim()],
     );
 
-    // Retrieve last 20 messages for context
     const historyResult = await pool.query(
       'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 20',
       [sessionId],
     );
     const history = historyResult.rows as MessageRow[];
 
-    // Build institute-specific prompt
     const systemPrompt = await buildSystemPrompt(instituteId);
-
     const client = getOpenAI();
     const completion = await client.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
@@ -122,7 +98,6 @@ async function getAIReply(
 
     const reply = completion.choices[0]?.message?.content ?? 'Sorry, I could not generate a response.';
 
-    // Persist assistant reply
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
       [sessionId, 'assistant', reply],
@@ -165,19 +140,16 @@ export async function initSession(instituteId: string): Promise<void> {
   if (existing?.status === 'initializing' || existing?.status === 'qr') return;
 
   console.log(`[WA] Initializing session for institute ${instituteId}`);
-
   const client = makeClient(instituteId);
   const state: SessionState = { client, qr: null, status: 'initializing' };
   sessions.set(instituteId, state);
 
   client.on('qr', (qr) => {
-    console.log(`[WA] QR received for institute ${instituteId}`);
     state.qr = qr;
     state.status = 'qr';
   });
 
   client.on('ready', async () => {
-    console.log(`[WA] Client ready for institute ${instituteId}`);
     state.qr = null;
     state.status = 'connected';
     await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
@@ -200,19 +172,16 @@ export async function initSession(instituteId: string): Promise<void> {
     const studentPhone = msg.from.replace('@c.us', '');
     const messageText = msg.body;
 
-    console.log(`[WA] Message for institute ${instituteId} from ${studentPhone}: ${messageText}`);
+    console.log(`[WA] Message for institute ${instituteId} from ${studentPhone}`);
 
-    await saveLead(Number(instituteId), studentPhone, messageText);
+    // Create/update lead with name extraction
+    await createLeadFromWhatsApp(Number(instituteId), studentPhone, messageText);
 
     const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
-    if (!reply) {
-      console.warn(`[WA] No AI reply generated for institute ${instituteId}`);
-      return;
-    }
+    if (!reply) return;
 
     try {
       await msg.reply(reply);
-      console.log(`[WA] Reply sent to ${studentPhone} for institute ${instituteId}`);
     } catch (err) {
       console.error(`[WA] Failed to send reply:`, err);
     }
