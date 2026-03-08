@@ -121,6 +121,10 @@ export default function Dashboard() {
     }, 5 * 60 * 1000);
 
     const handleMessage = (event: MessageEvent) => {
+      // 🔍 DEBUG — logs every postMessage so we can see real origin & data structure
+      console.log('ALL postMessage origin:', event.origin);
+      console.log('ALL postMessage data:', JSON.stringify(event.data));
+
       if (
         event.origin !== 'https://www.facebook.com' &&
         event.origin !== 'https://web.facebook.com'
@@ -211,10 +215,19 @@ export default function Dashboard() {
     // We rely entirely on the WA_EMBEDDED_SIGNUP FINISH postMessage above —
     // NOT on the FB.login callback code, which causes redirect_uri validation errors.
     window.FB.login(
-      () => {
-        // Intentionally empty — all handling is done via postMessage above.
-        // The FB.login callback 'code' is unreliable for Embedded Signup and
-        // causes "Error validating verification code" errors. Do not use it.
+      (response) => {
+        console.log('FB.login callback fired:', JSON.stringify(response));
+
+        // Popup closed — wait 2s for FINISH postMessage to arrive, then stop spinning if it didn't
+        setTimeout(() => {
+          if (!handled) {
+            handled = true;
+            clearTimeout(timeoutId);
+            window.removeEventListener('message', handleMessage);
+            setWaError('WhatsApp signup did not complete. Please try again.');
+            setConnectingWA(false);
+          }
+        }, 2000);
       },
       {
         config_id: metaConfigId,
