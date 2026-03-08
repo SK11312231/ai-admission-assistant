@@ -175,15 +175,19 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] Message for institute ${instituteId} from ${studentPhone}`);
 
     // Create/update lead with name extraction
-    await createLeadFromWhatsApp(Number(instituteId), studentPhone, messageText);
+    void createLeadFromWhatsApp(Number(instituteId), studentPhone, messageText);
 
-    const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
-    if (!reply) return;
-
+    // Generate and send reply independently
     try {
+      const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
+      if (!reply) {
+        console.warn(`[WA] No reply generated for institute ${instituteId}`);
+        return;
+      }
       await msg.reply(reply);
+      console.log(`[WA] Reply sent to ${studentPhone}`);
     } catch (err) {
-      console.error(`[WA] Failed to send reply:`, err);
+      console.error(`[WA] Failed to generate/send reply for institute ${instituteId}:`, err);
     }
   });
 
