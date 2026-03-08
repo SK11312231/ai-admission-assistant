@@ -281,7 +281,8 @@ export async function initSession(instituteId: string): Promise<void> {
         return;
       }
       console.log(`[WA] Sending reply to ${studentPhone}...`);
-      await msg.reply(reply);
+      // ✅ New — use client.sendMessage directly
+      await client.sendMessage(msg.from, reply);
       console.log(`[WA] ===== REPLY SENT SUCCESSFULLY =====`);
     } catch (err) {
       console.error(`[WA] CRITICAL: Failed to send reply:`, err);
