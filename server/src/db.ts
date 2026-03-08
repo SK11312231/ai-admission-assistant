@@ -41,6 +41,9 @@ export async function initDB(): Promise<void> {
     ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT;
   `);
   await pool.query(`
+    ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_waba_id TEXT;
+  `);
+  await pool.query(`
     ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_connected BOOLEAN NOT NULL DEFAULT FALSE;
   `);
 

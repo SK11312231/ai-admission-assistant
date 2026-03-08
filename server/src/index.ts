@@ -9,6 +9,7 @@ import { seed } from './seed';
 import institutesRouter from './routes/institutes';
 import leadsRouter from './routes/leads';
 import webhookRouter from './routes/webhook';
+import chatRouter from './routes/chat';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -54,6 +55,7 @@ const defaultLimiter = rateLimit({
 // API Routes — must be registered BEFORE static file serving
 app.use('/api/institutes', defaultLimiter, institutesRouter);
 app.use('/api/leads', defaultLimiter, leadsRouter);
+app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/webhook', webhookRouter);
 
 // Health check — verifies DB connectivity
