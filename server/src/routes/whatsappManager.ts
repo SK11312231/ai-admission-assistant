@@ -1,8 +1,7 @@
-import { Client, RemoteAuth, Message } from 'whatsapp-web.js';
+import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { getInstituteDetails } from './instituteEnrichment';
-import { Pool } from 'pg';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -18,10 +17,6 @@ interface MessageRow {
   role: 'user' | 'assistant';
   content: string;
 }
-
-// ── Constants ────────────────────────────────────────────────────────────────
-
-const WA_DATA_PATH = '/tmp/wwebjs_auth';
 
 // ── In-memory session store ──────────────────────────────────────────────────
 
@@ -39,98 +34,6 @@ function getOpenAI(): OpenAI {
     });
   }
   return openai;
-}
-
-// ── PostgreSQL RemoteAuth Store ──────────────────────────────────────────────
-
-class PostgresStore {
-  private pool: Pool;
-
-  constructor(pgPool: Pool) {
-    this.pool = pgPool;
-  }
-
-  async sessionExists(options: { session: string }): Promise<boolean> {
-    await this.ensureTable();
-    const result = await this.pool.query(
-      `SELECT 1 FROM whatsapp_sessions WHERE session_id = $1`,
-      [options.session],
-    );
-    return result.rows.length > 0;
-  }
-
-  async save(options: { session: string }): Promise<void> {
-    await this.ensureTable();
-    const fs = await import('fs/promises');
-    // RemoteAuth saves the zip directly inside WA_DATA_PATH
-    const zipPath = `${WA_DATA_PATH}/${options.session}.zip`;
-    try {
-      const data = await fs.readFile(zipPath);
-      const base64 = data.toString('base64');
-      await this.pool.query(
-        `INSERT INTO whatsapp_sessions (session_id, session_data, updated_at)
-         VALUES ($1, $2, NOW())
-         ON CONFLICT (session_id)
-         DO UPDATE SET session_data = EXCLUDED.session_data, updated_at = NOW()`,
-        [options.session, base64],
-      );
-      console.log(`[WA Store] Session saved: ${options.session}`);
-    } catch (err) {
-      console.error(`[WA Store] Failed to save session ${options.session}:`, err);
-    }
-  }
-
-  async extract(options: { session: string; path: string }): Promise<void> {
-    await this.ensureTable();
-    const result = await this.pool.query(
-      `SELECT session_data FROM whatsapp_sessions WHERE session_id = $1`,
-      [options.session],
-    );
-    if (result.rows.length === 0) {
-      console.log(`[WA Store] No session found for ${options.session}`);
-      return;
-    }
-    const fs = await import('fs/promises');
-    const fssync = await import('fs');
-    const path = await import('path');
-
-    // Ensure the directory exists
-    const dir = path.dirname(options.path);
-    if (!fssync.existsSync(dir)) {
-      await fs.mkdir(dir, { recursive: true });
-    }
-
-    const base64 = result.rows[0].session_data as string;
-    // options.path is the full path without .zip — RemoteAuth expects the zip here
-    const zipPath = `${options.path}.zip`;
-    await fs.writeFile(zipPath, Buffer.from(base64, 'base64'));
-    console.log(`[WA Store] Session extracted: ${options.session} → ${zipPath}`);
-  }
-
-  async delete(options: { session: string }): Promise<void> {
-    await this.ensureTable();
-    await this.pool.query(
-      `DELETE FROM whatsapp_sessions WHERE session_id = $1`,
-      [options.session],
-    );
-    console.log(`[WA Store] Session deleted: ${options.session}`);
-  }
-
-  private async ensureTable(): Promise<void> {
-    await this.pool.query(`
-      CREATE TABLE IF NOT EXISTS whatsapp_sessions (
-        session_id   TEXT PRIMARY KEY,
-        session_data TEXT NOT NULL,
-        updated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-  }
-}
-
-let store: PostgresStore | null = null;
-function getStore(): PostgresStore {
-  if (!store) store = new PostgresStore(pool);
-  return store;
 }
 
 // ── Save lead (self-contained) ───────────────────────────────────────────────
@@ -156,17 +59,14 @@ async function saveLead(
         [message, existing.rows[0].id],
       );
     } else {
-      // Try to extract student name — keep max_tokens small, no history needed
+      // Try name extraction — small call, non-blocking
       let studentName: string | null = null;
       try {
         const client = getOpenAI();
         const completion = await client.chat.completions.create({
           model: 'llama-3.3-70b-versatile',
           messages: [
-            {
-              role: 'system',
-              content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.',
-            },
+            { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
             { role: 'user', content: message },
           ],
           temperature: 0,
@@ -227,17 +127,15 @@ async function getAIReply(
   studentPhone: string,
   messageText: string,
 ): Promise<string | null> {
-  console.log(`[WA] getAIReply START — institute ${instituteId}, phone ${studentPhone}`);
+  console.log(`[WA] getAIReply START — institute ${instituteId}`);
   try {
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
-    // Save user message to history
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
       [sessionId, 'user', messageText.trim()],
     );
 
-    // Load last 10 messages only to avoid token limit issues
     const historyResult = await pool.query(
       'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 10',
       [sessionId],
@@ -259,11 +157,10 @@ async function getAIReply(
       max_tokens: 1024,
     });
 
-    // Use || instead of ?? to also catch empty string responses
+    // Use || to catch empty string responses
     const reply = completion.choices[0]?.message?.content?.trim() || 'Sorry, I could not generate a response.';
-    console.log(`[WA] Groq reply received (${reply.length} chars)`);
+    console.log(`[WA] Groq reply (${reply.length} chars): ${reply.slice(0, 80)}`);
 
-    // Save assistant reply to history
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
       [sessionId, 'assistant', reply],
@@ -277,14 +174,12 @@ async function getAIReply(
 }
 
 // ── Puppeteer client factory ─────────────────────────────────────────────────
+// Back to LocalAuth — simple, reliable, proven working
 
 function makeClient(instituteId: string): Client {
   return new Client({
-    authStrategy: new RemoteAuth({
+    authStrategy: new LocalAuth({
       clientId: `institute-${instituteId}`,
-      store: getStore(),
-      dataPath: WA_DATA_PATH,
-      backupSyncIntervalMs: 300_000,
     }),
     puppeteer: {
       args: [
@@ -322,14 +217,10 @@ export async function initSession(instituteId: string): Promise<void> {
   });
 
   client.on('ready', async () => {
-    console.log(`[WA] Client READY for institute ${instituteId}`);
+    console.log(`[WA] ✅ Client READY for institute ${instituteId}`);
     state.qr = null;
     state.status = 'connected';
     await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
-  });
-
-  client.on('remote_session_saved', () => {
-    console.log(`[WA] Session saved to DB for institute ${instituteId}`);
   });
 
   client.on('disconnected', async (reason) => {
@@ -353,18 +244,13 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone}`);
     console.log(`[WA] Text: ${messageText}`);
 
-    // Save lead in background — never blocks reply
+    // Fire-and-forget — never blocks reply
     void saveLead(Number(instituteId), studentPhone, messageText);
 
     try {
-      console.log(`[WA] Calling getAIReply...`);
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
-      console.log(`[WA] getAIReply returned: ${reply ? reply.slice(0, 80) : 'NULL'}`);
-      if (!reply) {
-        console.error(`[WA] No reply generated`);
-        return;
-      }
-      console.log(`[WA] Sending reply...`);
+      console.log(`[WA] Reply: ${reply ? reply.slice(0, 80) : 'NULL'}`);
+      if (!reply) return;
       await client.sendMessage(msg.from, reply);
       console.log(`[WA] ===== REPLY SENT =====`);
     } catch (err) {
