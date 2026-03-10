@@ -1,10 +1,10 @@
 import cron from 'node-cron';
-import pool from '../db';
+import pool from './db';
 import {
   sendFollowUpDueEmail,
   sendNoReplyReminderEmail,
   sendWeeklySummaryEmail,
-} from './emailService';
+} from './routes/emailService';
 
 // ── Follow-up Due Today ───────────────────────────────────────────────────────
 // Runs every day at 9:00 AM
