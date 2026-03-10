@@ -313,6 +313,39 @@ router.post('/:id/send-followup', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /api/leads/:id/conversation ─────────────────────────────────────────
+// Returns full conversation history for a lead from the messages table.
+
+router.get('/:id/conversation', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    // Get lead to find institute_id and student_phone
+    const leadResult = await pool.query(
+      `SELECT institute_id, student_phone FROM leads WHERE id = $1`,
+      [Number(id)],
+    );
+    const lead = leadResult.rows[0];
+    if (!lead) {
+      res.status(404).json({ error: 'Lead not found.' });
+      return;
+    }
+
+    const sessionId = `wa-${lead.institute_id}-${lead.student_phone}`;
+    const result = await pool.query(
+      `SELECT role, content, created_at
+       FROM messages
+       WHERE session_id = $1
+       ORDER BY created_at ASC`,
+      [sessionId],
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Conversation fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch conversation.' });
+  }
+});
+
 // ── Export helper for whatsappManager to create leads with name extraction ───
 
 export async function createLeadFromWhatsApp(

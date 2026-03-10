@@ -28,6 +28,12 @@ interface Lead {
   created_at: string;
 }
 
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  created_at: string;
+}
+
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
 type Tab = 'leads' | 'profile';
 
@@ -89,6 +95,9 @@ export default function Dashboard() {
   const [editingFollowUp, setEditingFollowUp] = useState<Record<number, string>>({});
   const [sendingFollowUp, setSendingFollowUp] = useState<Record<number, boolean>>({});
   const [followUpResult, setFollowUpResult] = useState<Record<number, { ok: boolean; msg: string }>>({});
+  const [conversations, setConversations] = useState<Record<number, ChatMessage[]>>({});
+  const [convLoading, setConvLoading] = useState<Record<number, boolean>>({});
+  const [drawerTab, setDrawerTab] = useState<Record<number, 'chat' | 'notes' | 'followup'>>({});
 
   // Add lead modal
   const [showAddLead, setShowAddLead] = useState(false);
@@ -286,6 +295,21 @@ export default function Dashboard() {
       setSendingFollowUp(prev => ({ ...prev, [lead.id]: false }));
     }
   };
+
+  const fetchConversation = async (lead: Lead) => {
+    if (conversations[lead.id]) return; // already loaded
+    setConvLoading(prev => ({ ...prev, [lead.id]: true }));
+    try {
+      const res = await fetch(apiUrl(`/api/leads/${lead.id}/conversation`));
+      if (res.ok) {
+        const data = await res.json() as ChatMessage[];
+        setConversations(prev => ({ ...prev, [lead.id]: data }));
+      }
+    } catch { /* silent */ }
+    finally { setConvLoading(prev => ({ ...prev, [lead.id]: false })); }
+  };
+
+  const getDrawerTab = (leadId: number) => drawerTab[leadId] ?? 'chat';
 
   // ── Add lead ────────────────────────────────────────────────────────────────
   const handleAddLead = async () => {
@@ -531,7 +555,11 @@ export default function Dashboard() {
 
                     {/* Lead row */}
                     <div className="p-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => setExpandedLead(isExpanded ? null : lead.id)}>
+                      <div className="flex-1 min-w-0 cursor-pointer" onClick={() => {
+                        const next = isExpanded ? null : lead.id;
+                        setExpandedLead(next);
+                        if (next !== null) void fetchConversation(lead);
+                      }}>
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
                           <h3 className="font-semibold text-gray-900 text-sm">{lead.student_name ?? 'Unknown Student'}</h3>
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[lead.status] ?? 'bg-gray-100 text-gray-600'}`}>{lead.status}</span>
@@ -558,7 +586,11 @@ export default function Dashboard() {
                           <option value="converted">Converted</option>
                           <option value="lost">Lost</option>
                         </select>
-                        <button onClick={() => setExpandedLead(isExpanded ? null : lead.id)}
+                        <button onClick={() => {
+                          const next = isExpanded ? null : lead.id;
+                          setExpandedLead(next);
+                          if (next !== null) void fetchConversation(lead);
+                        }}
                           className="text-gray-400 hover:text-gray-600 text-lg leading-none px-1">
                           {isExpanded ? '▲' : '▼'}
                         </button>
@@ -567,96 +599,137 @@ export default function Dashboard() {
 
                     {/* Expanded drawer */}
                     {isExpanded && (
-                      <div className="border-t border-gray-100 px-4 py-4 grid sm:grid-cols-2 gap-4 bg-gray-50 rounded-b-xl">
+                      <div className="border-t border-gray-100 bg-gray-50 rounded-b-xl">
 
-                        {/* Notes */}
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">📝 Notes</label>
-                          <textarea
-                            defaultValue={lead.notes ?? ''}
-                            onChange={e => setEditingNotes(prev => ({ ...prev, [lead.id]: e.target.value }))}
-                            rows={3}
-                            placeholder="Add notes about this lead…"
-                            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-white"
-                          />
-                          <button
-                            onClick={() => void saveNotes(lead)}
-                            disabled={savingNotes[lead.id]}
-                            className="mt-1.5 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                            {savingNotes[lead.id] ? 'Saving…' : 'Save Notes'}
-                          </button>
+                        {/* Drawer tabs */}
+                        <div className="flex border-b border-gray-200 px-4">
+                          {(['chat', 'notes', 'followup'] as const).map(tab => (
+                            <button key={tab} onClick={() => setDrawerTab(prev => ({ ...prev, [lead.id]: tab }))}
+                              className={`px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors ${getDrawerTab(lead.id) === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                              {tab === 'chat' ? '💬 Conversation' : tab === 'notes' ? '📝 Notes' : '📅 Follow-up'}
+                            </button>
+                          ))}
                         </div>
 
-                        {/* Follow-up date + Send button */}
-                        <div>
-                          <label className="block text-xs font-medium text-gray-700 mb-1">📅 Follow-up Date</label>
-                          <input
-                            type="date"
-                            defaultValue={lead.follow_up_date ? lead.follow_up_date.slice(0, 10) : ''}
-                            onChange={e => setEditingFollowUp(prev => ({ ...prev, [lead.id]: e.target.value }))}
-                            className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
-                          />
-                          {lead.follow_up_date && (
-                            <p className={`text-xs mt-1 ${overdue ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
-                              {overdue ? '⚠️ ' : ''}{followUpLabel}
-                            </p>
-                          )}
-                          <div className="flex gap-2 mt-1.5 flex-wrap">
-                            <button
-                              onClick={() => void saveFollowUp(lead)}
-                              disabled={savingFollowUp[lead.id]}
-                              className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                              {savingFollowUp[lead.id] ? 'Saving…' : 'Set Date'}
-                            </button>
-                            {lead.follow_up_date && (
+                        <div className="p-4">
+
+                          {/* ── Chat tab ── */}
+                          {getDrawerTab(lead.id) === 'chat' && (
+                            <div>
+                              {convLoading[lead.id] ? (
+                                <div className="text-center py-8 text-gray-400 text-sm">Loading conversation…</div>
+                              ) : !conversations[lead.id] || conversations[lead.id].length === 0 ? (
+                                <div className="text-center py-8 text-gray-400 text-sm">No messages yet.</div>
+                              ) : (
+                                <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                                  {conversations[lead.id].map((msg, i) => (
+                                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                                      <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${
+                                        msg.role === 'user'
+                                          ? 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm'
+                                          : 'bg-indigo-600 text-white rounded-tr-sm'
+                                      }`}>
+                                        <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                                        <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-gray-400' : 'text-indigo-200'}`}>
+                                          {new Date(msg.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                        </p>
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
                               <button
                                 onClick={() => {
-                                  setEditingFollowUp(prev => ({ ...prev, [lead.id]: '' }));
-                                  void (async () => {
-                                    await fetch(apiUrl(`/api/leads/${lead.id}/followup`), {
-                                      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                                      body: JSON.stringify({ follow_up_date: null }),
-                                    });
-                                    setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, follow_up_date: null } : l));
-                                  })();
+                                  setConversations(prev => { const n = {...prev}; delete n[lead.id]; return n; });
+                                  void fetchConversation(lead);
                                 }}
-                                className="text-xs border border-gray-300 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100">
-                                Clear
+                                className="mt-2 text-xs text-indigo-500 hover:text-indigo-700 underline">
+                                Refresh
                               </button>
-                            )}
-                          </div>
+                            </div>
+                          )}
 
-                          {/* Send Follow-up via WhatsApp */}
-                          <div className="mt-4 pt-3 border-t border-gray-200">
-                            <label className="block text-xs font-medium text-gray-700 mb-1">💬 Send AI Follow-up</label>
-                            <p className="text-xs text-gray-400 mb-2">
-                              AI will generate a personalised follow-up message and send it to the student via WhatsApp instantly.
-                            </p>
-                            <button
-                              onClick={() => void sendFollowUp(lead)}
-                              disabled={sendingFollowUp[lead.id] || !institute?.whatsapp_connected}
-                              className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5">
-                              {sendingFollowUp[lead.id] ? (
-                                <><span className="animate-spin">⏳</span> Sending…</>
-                              ) : (
-                                <>📲 Send Follow-up on WhatsApp</>
-                              )}
-                            </button>
-                            {!institute?.whatsapp_connected && (
-                              <p className="text-xs text-amber-600 mt-1">Connect WhatsApp first to send follow-ups.</p>
-                            )}
-                            {followUpResult[lead.id]?.msg && (
-                              <div className={`mt-2 text-xs rounded-lg px-3 py-2 ${followUpResult[lead.id].ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
-                                {followUpResult[lead.id].ok ? (
-                                  <><span className="font-medium">Sent!</span> "{followUpResult[lead.id].msg.slice(0, 100)}{followUpResult[lead.id].msg.length > 100 ? '…' : ''}"</>
-                                ) : (
-                                  followUpResult[lead.id].msg
+                          {/* ── Notes tab ── */}
+                          {getDrawerTab(lead.id) === 'notes' && (
+                            <div>
+                              <textarea
+                                defaultValue={lead.notes ?? ''}
+                                onChange={e => setEditingNotes(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                                rows={4}
+                                placeholder="Add notes about this lead…"
+                                className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-white"
+                              />
+                              <button
+                                onClick={() => void saveNotes(lead)}
+                                disabled={savingNotes[lead.id]}
+                                className="mt-2 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                                {savingNotes[lead.id] ? 'Saving…' : 'Save Notes'}
+                              </button>
+                            </div>
+                          )}
+
+                          {/* ── Follow-up tab ── */}
+                          {getDrawerTab(lead.id) === 'followup' && (
+                            <div className="grid sm:grid-cols-2 gap-4">
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">Set Follow-up Date</label>
+                                <input
+                                  type="date"
+                                  defaultValue={lead.follow_up_date ? lead.follow_up_date.slice(0, 10) : ''}
+                                  onChange={e => setEditingFollowUp(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                                  className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white"
+                                />
+                                {lead.follow_up_date && (
+                                  <p className={`text-xs mt-1 ${overdue ? 'text-red-500 font-medium' : 'text-gray-400'}`}>
+                                    {overdue ? '⚠️ ' : ''}{followUpLabel}
+                                  </p>
+                                )}
+                                <div className="flex gap-2 mt-2">
+                                  <button onClick={() => void saveFollowUp(lead)} disabled={savingFollowUp[lead.id]}
+                                    className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                                    {savingFollowUp[lead.id] ? 'Saving…' : 'Set Date'}
+                                  </button>
+                                  {lead.follow_up_date && (
+                                    <button onClick={() => {
+                                      setEditingFollowUp(prev => ({ ...prev, [lead.id]: '' }));
+                                      void (async () => {
+                                        await fetch(apiUrl(`/api/leads/${lead.id}/followup`), {
+                                          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                                          body: JSON.stringify({ follow_up_date: null }),
+                                        });
+                                        setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, follow_up_date: null } : l));
+                                      })();
+                                    }} className="text-xs border border-gray-300 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100">
+                                      Clear
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              <div>
+                                <label className="block text-xs font-medium text-gray-700 mb-1">💬 Send AI Follow-up on WhatsApp</label>
+                                <p className="text-xs text-gray-400 mb-2">AI generates a personalised message and sends it instantly.</p>
+                                <button
+                                  onClick={() => void sendFollowUp(lead)}
+                                  disabled={sendingFollowUp[lead.id] || !institute?.whatsapp_connected}
+                                  className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5">
+                                  {sendingFollowUp[lead.id] ? <><span className="animate-spin inline-block">⏳</span> Sending…</> : <>📲 Send Follow-up</>}
+                                </button>
+                                {!institute?.whatsapp_connected && (
+                                  <p className="text-xs text-amber-600 mt-1">Connect WhatsApp first.</p>
+                                )}
+                                {followUpResult[lead.id]?.msg && (
+                                  <div className={`mt-2 text-xs rounded-lg px-3 py-2 ${followUpResult[lead.id].ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                    {followUpResult[lead.id].ok
+                                      ? <><span className="font-medium">Sent!</span> "{followUpResult[lead.id].msg.slice(0, 100)}{followUpResult[lead.id].msg.length > 100 ? '…' : ''}"</>
+                                      : followUpResult[lead.id].msg}
+                                  </div>
                                 )}
                               </div>
-                            )}
-                          </div>
-                        </div>
+                            </div>
+                          )}
 
+                        </div>
                       </div>
                     )}
                   </div>
