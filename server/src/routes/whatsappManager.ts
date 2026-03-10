@@ -1,6 +1,7 @@
 import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
+import { isNumberBlocked } from './blocklist';
 import { getInstituteDetails } from './instituteEnrichment';
 import { sendNewLeadEmail } from './emailService';
 
@@ -303,6 +304,14 @@ export async function initSession(instituteId: string): Promise<void> {
     if (msg.from.endsWith('@lid')) return;         // linked device messages
     if (msg.from === 'status@broadcast') return;   // status updates
     if (!msg.body || msg.body.trim() === '') return; // empty messages
+
+    // Check blocklist — silently ignore blocked numbers
+    const phoneClean = msg.from.replace('@c.us', '').replace(/[\s\-\+]/g, '');
+    const blocked = await isNumberBlocked(Number(instituteId), phoneClean);
+    if (blocked) {
+      console.log(`[WA] Blocked number ${phoneClean} — ignoring message.`);
+      return;
+    }
 
     const studentPhone = msg.from.replace('@c.us', '');
     const messageText = msg.body;

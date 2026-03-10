@@ -34,8 +34,16 @@ interface ChatMessage {
   created_at: string;
 }
 
+interface BlockedNumber {
+  id: number;
+  institute_id: number;
+  phone: string;
+  reason: string | null;
+  created_at: string;
+}
+
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
-type Tab = 'leads' | 'profile';
+type Tab = 'leads' | 'profile' | 'blocklist';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,6 +98,15 @@ export default function Dashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [reEnriching, setReEnriching] = useState(false);
+
+  // ── Blocklist state ──────────────────────────────────────────────────────────
+  const [blocklist, setBlocklist] = useState<BlockedNumber[]>([]);
+  const [blocklistLoading, setBlocklistLoading] = useState(false);
+  const [blocklistError, setBlocklistError] = useState<string | null>(null);
+  const [newBlockPhone, setNewBlockPhone] = useState('');
+  const [newBlockReason, setNewBlockReason] = useState('');
+  const [addingBlock, setAddingBlock] = useState(false);
+  const [addBlockError, setAddBlockError] = useState<string | null>(null);
 
   // Lead detail / notes drawer
   const [expandedLead, setExpandedLead] = useState<number | null>(null);
@@ -172,6 +189,17 @@ export default function Dashboard() {
       } catch { setProfileData(''); }
       finally { setProfileLoading(false); }
     })();
+  }, [activeTab, institute]);
+
+  useEffect(() => {
+    if (activeTab !== 'blocklist' || !institute) return;
+    setBlocklistLoading(true);
+    setBlocklistError(null);
+    fetch(apiUrl(`/api/blocklist/${institute.id}`))
+      .then(r => r.json())
+      .then((data: BlockedNumber[]) => setBlocklist(data))
+      .catch(() => setBlocklistError('Failed to load blocklist.'))
+      .finally(() => setBlocklistLoading(false));
   }, [activeTab, institute]);
 
   // ── WhatsApp ────────────────────────────────────────────────────────────────
@@ -341,7 +369,7 @@ export default function Dashboard() {
   };
 
   // ── Derived ──────────────────────────────────────────────────────────────────
-  const filteredLeads = filter === 'all' ? leads : leads.filter(l => l.status === filter);
+  const filteredLeads = (filter === 'all' ? leads.filter(l => l.status !== 'lost') : leads.filter(l => l.status === filter));
   const overdueCount = leads.filter(l => isOverdue(l.follow_up_date) && l.status !== 'converted' && l.status !== 'lost').length;
   const stats = {
     total: leads.length,
@@ -516,10 +544,10 @@ export default function Dashboard() {
 
       {/* ── Tabs ─────────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 mb-6 border-b border-gray-200">
-        {(['leads', 'profile'] as Tab[]).map(tab => (
+        {(['leads', 'profile', 'blocklist'] as Tab[]).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {tab === 'leads' ? '📋 Leads' : '🏫 Institute Profile'}
+            {tab === 'leads' ? '📋 Leads' : tab === 'profile' ? '🏫 Institute Profile' : '🚫 Blocklist'}
           </button>
         ))}
       </div>
@@ -749,6 +777,106 @@ export default function Dashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* ── Blocklist Tab ─────────────────────────────────────────────────────── */}
+      {activeTab === 'blocklist' && (
+        <div>
+          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">Blocklist</h2>
+              <p className="text-xs text-gray-500 mt-0.5">
+                Numbers on this list will not receive AI replies and won't create new leads. Lost leads are added automatically.
+              </p>
+            </div>
+          </div>
+
+          {/* Add number form */}
+          <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5">
+            <p className="text-sm font-medium text-gray-700 mb-3">Add a number manually</p>
+            {addBlockError && (
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2 mb-3">{addBlockError}</div>
+            )}
+            <div className="flex flex-col sm:flex-row gap-2">
+              <input
+                type="tel"
+                value={newBlockPhone}
+                onChange={e => setNewBlockPhone(e.target.value)}
+                placeholder="Phone number e.g. 919876543210"
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <input
+                type="text"
+                value={newBlockReason}
+                onChange={e => setNewBlockReason(e.target.value)}
+                placeholder="Reason (optional)"
+                className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              />
+              <button
+                onClick={() => {
+                  if (!institute || !newBlockPhone.trim()) { setAddBlockError('Phone number is required.'); return; }
+                  setAddingBlock(true); setAddBlockError(null);
+                  fetch(apiUrl('/api/blocklist'), {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ institute_id: institute.id, phone: newBlockPhone.trim(), reason: newBlockReason.trim() || null }),
+                  })
+                    .then(async r => {
+                      const d = await r.json() as BlockedNumber & { error?: string };
+                      if (!r.ok) throw new Error(d.error ?? 'Failed to add.');
+                      setBlocklist(prev => [d, ...prev]);
+                      setNewBlockPhone(''); setNewBlockReason('');
+                    })
+                    .catch(err => setAddBlockError(err instanceof Error ? err.message : 'Failed to add.'))
+                    .finally(() => setAddingBlock(false));
+                }}
+                disabled={addingBlock}
+                className="flex-shrink-0 bg-indigo-600 text-white text-sm font-semibold px-4 py-2 rounded-lg hover:bg-indigo-700 disabled:opacity-50 transition-colors"
+              >
+                {addingBlock ? 'Adding…' : '+ Add'}
+              </button>
+            </div>
+          </div>
+
+          {/* Blocklist table */}
+          {blocklistLoading ? (
+            <div className="text-center py-16">
+              <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-sm text-gray-400">Loading blocklist…</p>
+            </div>
+          ) : blocklistError ? (
+            <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">{blocklistError}</div>
+          ) : blocklist.length === 0 ? (
+            <div className="text-center py-16">
+              <span className="text-5xl block mb-4">✅</span>
+              <h3 className="text-base font-semibold text-gray-700 mb-1">Blocklist is empty</h3>
+              <p className="text-sm text-gray-500">Numbers marked as Lost will appear here automatically.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {blocklist.map(entry => (
+                <div key={entry.id} className="bg-white border border-gray-200 rounded-xl px-4 py-3 flex items-center justify-between gap-4">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{entry.phone}</p>
+                    {entry.reason && <p className="text-xs text-gray-500 mt-0.5">{entry.reason}</p>}
+                    <p className="text-xs text-gray-400 mt-0.5">{new Date(entry.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</p>
+                  </div>
+                  <button
+                    onClick={() => {
+                      if (!window.confirm(`Remove ${entry.phone} from blocklist?`)) return;
+                      fetch(apiUrl(`/api/blocklist/${entry.id}`), { method: 'DELETE' })
+                        .then(() => setBlocklist(prev => prev.filter(b => b.id !== entry.id)))
+                        .catch(() => alert('Failed to remove. Try again.'));
+                    }}
+                    className="flex-shrink-0 text-xs text-red-500 border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors"
+                  >
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       )}
 
       {/* ── Profile Tab ──────────────────────────────────────────────────────── */}

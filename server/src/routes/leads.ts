@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
 import pool from '../db';
+import { addToBlocklist } from './blocklist';
 
 const router = Router();
 
@@ -167,6 +168,20 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
       `UPDATE leads SET status = $1, last_activity_at = NOW() WHERE id = $2`,
       [status, Number(id)],
     );
+
+    // Auto-add to blocklist when marked as Lost
+    if (status === 'lost') {
+      const leadResult = await pool.query(
+        `SELECT institute_id, student_phone, student_name FROM leads WHERE id = $1`,
+        [Number(id)],
+      );
+      const lead = leadResult.rows[0];
+      if (lead) {
+        const reason = `Marked as lost${lead.student_name ? ` — ${lead.student_name as string}` : ''}`;
+        void addToBlocklist(lead.institute_id as number, lead.student_phone as string, reason);
+      }
+    }
+
     res.json({ success: true });
   } catch (err) {
     console.error('Update status error:', err);
