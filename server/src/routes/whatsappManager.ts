@@ -39,12 +39,37 @@ function getOpenAI(): OpenAI {
 
 // ── Save lead (self-contained) ───────────────────────────────────────────────
 
+// Spam patterns to block from being saved as leads
+const SPAM_PATTERNS = [
+  /@lid$/,
+  /@newsletter$/,
+  /paymentredirect/i,
+  /policybazaar/i,
+  /insuremile/i,
+  /type \*#\*/i,
+  /restart your journey/i,
+];
+
+function isSpam(phone: string, message: string): boolean {
+  if (SPAM_PATTERNS.some(p => p.test(phone))) return true;
+  if (SPAM_PATTERNS.some(p => p.test(message))) return true;
+  // Block if message is just a URL with no other content
+  const urlOnly = /^https?:\/\/\S+$/.test(message.trim());
+  if (urlOnly) return true;
+  return false;
+}
+
 async function saveLead(
   instituteId: number,
   studentPhone: string,
   message: string,
 ): Promise<void> {
   try {
+    // Block spam before touching the DB
+    if (isSpam(studentPhone, message)) {
+      console.log(`[WA] Spam detected, skipping lead save: ${studentPhone}`);
+      return;
+    }
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS notes TEXT`);
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_date TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -271,7 +296,13 @@ export async function initSession(instituteId: string): Promise<void> {
   });
 
   client.on('message', async (msg: Message) => {
-    if (msg.from.endsWith('@g.us') || msg.from === 'status@broadcast' || msg.fromMe) return;
+    // Filter out groups, broadcasts, newsletters, linked devices, and system messages
+    if (msg.fromMe) return;
+    if (msg.from.endsWith('@g.us')) return;       // group messages
+    if (msg.from.endsWith('@newsletter')) return;  // WhatsApp channel/newsletter
+    if (msg.from.endsWith('@lid')) return;         // linked device messages
+    if (msg.from === 'status@broadcast') return;   // status updates
+    if (!msg.body || msg.body.trim() === '') return; // empty messages
 
     const studentPhone = msg.from.replace('@c.us', '');
     const messageText = msg.body;
