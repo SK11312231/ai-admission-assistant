@@ -92,15 +92,28 @@ async function saveLead(
 
 async function buildSystemPrompt(instituteId: number): Promise<string> {
   try {
-    const instResult = await pool.query('SELECT name FROM institutes WHERE id = $1', [instituteId]);
+    const instResult = await pool.query(
+      'SELECT name, website FROM institutes WHERE id = $1',
+      [instituteId],
+    );
     const instituteName: string = instResult.rows[0]?.name ?? 'this institute';
+    const website: string | null = instResult.rows[0]?.website ?? null;
 
     let instituteData: string | null = null;
     try { instituteData = await getInstituteDetails(instituteId); } catch { /* non-fatal */ }
 
+    // If no institute data exists, trigger enrichment in background so next message is better
+    if (!instituteData) {
+      console.log(`[WA] No institute details found for ${instituteId} — triggering enrichment`);
+      const { scrapeAndEnrich } = await import('./instituteEnrichment');
+      void scrapeAndEnrich(instituteId, instituteName, website);
+    }
+
     const contextSection = instituteData
       ? `You have the following detailed information about ${instituteName}:\n\n${instituteData}`
-      : `You are representing ${instituteName}. Detailed profile information is not yet available. Answer general admission-related questions helpfully.`;
+      : `You are representing ${instituteName}. You do not yet have specific details about this institute's courses or fees. ` +
+        `Be honest that you are still gathering information, and ask the student what specific aspect they want to know about ` +
+        `(e.g. courses, fees, eligibility, placements) so you can help them better.`;
 
     return (
       `You are an AI admission assistant for ${instituteName}. ` +
@@ -108,11 +121,11 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
       `${contextSection}\n\n` +
       `Guidelines:\n` +
       `- Be warm, encouraging, and professional.\n` +
-      `- Answer based on the institute information provided above.\n` +
-      `- If a question is outside the available information, say so honestly.\n` +
-      `- Keep responses concise and helpful (2-3 paragraphs max).\n` +
-      `- You are replying via WhatsApp — use plain text only, no markdown.\n` +
-      `- Never make up fees, dates, or facts not present in the institute data.`
+      `- Answer ONLY based on the institute information provided above — do not invent or assume any facts.\n` +
+      `- If asked about specific courses, fees, or dates not mentioned above, say you will check and get back to them.\n` +
+      `- Keep responses concise (2-3 short paragraphs max).\n` +
+      `- You are replying via WhatsApp — use plain text only, absolutely no markdown like ** or ##.\n` +
+      `- Never repeat the same greeting in follow-up messages — get straight to the point.`
     );
   } catch (err) {
     console.error(`[WA] buildSystemPrompt failed:`, err);
@@ -131,17 +144,19 @@ async function getAIReply(
   try {
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
-    await pool.query(
-      'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
-      [sessionId, 'user', messageText.trim()],
-    );
-
+    // Fetch history BEFORE inserting current message to avoid duplication
     const historyResult = await pool.query(
       'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 10',
       [sessionId],
     );
     const history = historyResult.rows as MessageRow[];
     console.log(`[WA] History: ${history.length} messages`);
+
+    // Save current user message to DB
+    await pool.query(
+      'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
+      [sessionId, 'user', messageText.trim()],
+    );
 
     const systemPrompt = await buildSystemPrompt(instituteId);
     console.log(`[WA] Calling Groq...`);
@@ -152,6 +167,7 @@ async function getAIReply(
       messages: [
         { role: 'system', content: systemPrompt },
         ...history.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'user', content: messageText.trim() }, // add current message explicitly
       ],
       temperature: 0.7,
       max_tokens: 1024,

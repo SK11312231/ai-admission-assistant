@@ -110,6 +110,34 @@ export default function Dashboard() {
     setInstitute(inst);
 
     void (async () => {
+      // Always verify actual WA status from server — never trust localStorage alone
+      try {
+        const waRes = await fetch(apiUrl(`/api/institutes/${inst.id}/whatsapp-status`));
+        if (waRes.ok) {
+          const waData = await waRes.json() as { status: WAStatus; qr: string | null };
+          if (waData.status === 'connected') {
+            const updated = { ...inst, whatsapp_connected: true };
+            setInstitute(updated);
+            localStorage.setItem('institute', JSON.stringify(updated));
+          } else if (waData.status === 'qr') {
+            // Session lost after redeploy — show QR modal automatically
+            const updated = { ...inst, whatsapp_connected: false };
+            setInstitute(updated);
+            localStorage.setItem('institute', JSON.stringify(updated));
+            setWaStatus('qr');
+            if (waData.qr) setQrDataUrl(waData.qr);
+            setShowQRModal(true);
+            startPolling(updated);
+          } else {
+            // disconnected — update localStorage
+            const updated = { ...inst, whatsapp_connected: false };
+            setInstitute(updated);
+            localStorage.setItem('institute', JSON.stringify(updated));
+          }
+        }
+      } catch { /* use localStorage as fallback */ }
+
+      // Fetch leads
       try {
         const res = await fetch(apiUrl(`/api/leads/${inst.id}`));
         if (!res.ok) throw new Error();
@@ -117,7 +145,7 @@ export default function Dashboard() {
       } catch { /* silent */ }
       finally { setLoading(false); }
     })();
-  }, [navigate]);
+  }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Profile tab load ────────────────────────────────────────────────────────
   useEffect(() => {
