@@ -40,12 +40,13 @@ export default function Login() {
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md">
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
+
           <div className="text-center mb-8">
-            <span className="text-4xl">🔑</span>
-            <h1 className="text-2xl font-bold text-gray-900 mt-3">Welcome Back</h1>
-            <p className="text-gray-500 text-sm mt-1">
-              Login to access your institute dashboard
-            </p>
+            <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
+              <span className="text-white text-2xl font-extrabold">LC</span>
+            </div>
+            <h1 className="text-2xl font-bold text-gray-900">Welcome Back</h1>
+            <p className="text-gray-500 text-sm mt-1">Login to access your institute dashboard</p>
           </div>
 
           {error && (
@@ -60,12 +61,8 @@ export default function Login() {
                 Email
               </label>
               <input
-                id="email"
-                name="email"
-                type="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                id="email" name="email" type="email" required
+                value={email} onChange={(e) => setEmail(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="contact@institute.com"
               />
@@ -76,23 +73,23 @@ export default function Login() {
                 Password
               </label>
               <input
-                id="password"
-                name="password"
-                type="password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                id="password" name="password" type="password" required
+                value={password} onChange={(e) => setPassword(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 placeholder="Enter your password"
               />
             </div>
 
             <button
-              type="submit"
-              disabled={loading}
+              type="submit" disabled={loading}
               className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm mt-2"
             >
-              {loading ? 'Logging in…' : 'Login'}
+              {loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  Logging in…
+                </span>
+              ) : 'Login →'}
             </button>
           </form>
 

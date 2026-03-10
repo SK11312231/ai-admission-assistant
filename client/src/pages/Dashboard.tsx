@@ -48,7 +48,11 @@ const STATUS_COLORS: Record<string, string> = {
 
 function isOverdue(date: string | null): boolean {
   if (!date) return false;
-  return new Date(date) < new Date();
+  const followUp = new Date(date);
+  followUp.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return followUp < today;
 }
 
 function formatFollowUp(date: string | null): string {
@@ -213,10 +217,16 @@ export default function Dashboard() {
 
   const handleDisconnect = async () => {
     if (!institute) return;
+    if (!window.confirm('Disconnect WhatsApp? You will need to scan a QR code again to reconnect.')) return;
     await fetch(apiUrl(`/api/institutes/${institute.id}/disconnect-whatsapp`), { method: 'DELETE' });
     const updated = { ...institute, whatsapp_connected: false };
     setInstitute(updated);
     localStorage.setItem('institute', JSON.stringify(updated));
+  };
+
+  const handleLogout = () => {
+    localStorage.removeItem('institute');
+    navigate('/');
   };
 
   // ── Profile ─────────────────────────────────────────────────────────────────
@@ -261,6 +271,7 @@ export default function Dashboard() {
       body: JSON.stringify({ notes }),
     });
     setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, notes } : l));
+    setEditingNotes(prev => { const n = { ...prev }; delete n[lead.id]; return n; });
     setSavingNotes(prev => ({ ...prev, [lead.id]: false }));
   };
 
@@ -289,6 +300,8 @@ export default function Dashboard() {
         body: JSON.stringify({ follow_up_date: null }),
       });
       setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, follow_up_date: null } : l));
+      // Clear conversation cache so chat tab reloads with the new follow-up message
+      setConversations(prev => { const n = { ...prev }; delete n[lead.id]; return n; });
     } catch (err) {
       setFollowUpResult(prev => ({ ...prev, [lead.id]: { ok: false, msg: err instanceof Error ? err.message : 'Failed to send.' } }));
     } finally {
@@ -447,11 +460,14 @@ export default function Dashboard() {
             {' '}· <span className="bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-0.5 rounded-full uppercase">{institute.plan}</span>
           </p>
         </div>
-        {institute.whatsapp_connected && (
-          <button onClick={() => void handleDisconnect()} className="text-xs text-red-500 hover:text-red-700 underline">
-            Disconnect WhatsApp
-          </button>
-        )}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {institute.whatsapp_connected && (
+            <button onClick={() => void handleDisconnect()}
+              className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+              📵 Disconnect WhatsApp
+            </button>
+          )}
+        </div>
       </div>
 
       {/* ── WhatsApp Banner ──────────────────────────────────────────────────── */}
@@ -533,7 +549,7 @@ export default function Dashboard() {
 
           {loading ? (
             <div className="text-center py-20 text-gray-400">
-              <div className="text-4xl mb-4 animate-spin inline-block">⏳</div>
+              <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
               <p>Loading leads…</p>
             </div>
           ) : filteredLeads.length === 0 ? (
@@ -754,7 +770,7 @@ export default function Dashboard() {
             </button>
           </div>
           {profileMsg && (
-            <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${profileMsg.includes('success') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
+            <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${profileMsg.toLowerCase().includes('success') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
               {profileMsg}
             </div>
           )}

@@ -24,22 +24,28 @@ export default function Navbar() {
   return (
     <nav className="bg-white shadow-sm sticky top-0 z-50">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+
         {/* Logo */}
         <Link to="/" className="flex items-center gap-2 text-indigo-600 font-bold text-lg">
           <span className="text-2xl">📲</span>
           <span>LeadCapture</span>
         </Link>
 
-        {/* Navigation links */}
+        {/* Nav links */}
         <div className="flex items-center gap-6">
           {loggedIn ? (
-            <button
-              onClick={handleLogout}
-              aria-label="Log out of dashboard"
-              className="text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
-            >
-              Logout
-            </button>
+            <>
+              <NavLink to="/dashboard" className={linkClass}>
+                Dashboard
+              </NavLink>
+              <button
+                onClick={handleLogout}
+                aria-label="Log out of dashboard"
+                className="text-sm font-medium text-gray-600 hover:text-red-600 transition-colors"
+              >
+                Logout
+              </button>
+            </>
           ) : (
             <>
               <NavLink to="/" end className={linkClass}>

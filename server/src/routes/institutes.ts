@@ -64,8 +64,8 @@ router.post('/register', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'WhatsApp number is required.' });
     return;
   }
-  if (!plan || !['free', 'advance', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: free, advance, pro.' });
+  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
     return;
   }
   if (!password || typeof password !== 'string' || password.length < 6) {

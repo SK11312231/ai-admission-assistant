@@ -15,14 +15,13 @@ export default function ChatWindow() {
     {
       role: 'assistant',
       content:
-        "Hi! I'm your AI admission counselor 🎓 I can help you explore universities, understand admission requirements, and guide you through the application process. What would you like to know?",
+        "Hi! I'm an AI admission assistant 🎓 I can help you with information about courses, fees, eligibility criteria, and the admission process. What would you like to know?",
     },
   ]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
 
-  // Scroll to the latest message whenever messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, loading]);
@@ -62,7 +61,6 @@ export default function ChatWindow() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // Send on Enter (without Shift)
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       void sendMessage();
@@ -77,7 +75,7 @@ export default function ChatWindow() {
           <MessageBubble key={i} role={msg.role} content={msg.content} />
         ))}
 
-        {/* Thinking indicator */}
+        {/* Typing indicator */}
         {loading && (
           <div className="flex justify-start mb-3">
             <div className="w-8 h-8 rounded-full bg-indigo-100 flex items-center justify-center text-base mr-2 flex-shrink-0 mt-1">
@@ -102,7 +100,7 @@ export default function ChatWindow() {
           <textarea
             className="flex-1 resize-none rounded-xl border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent placeholder-gray-400 max-h-32"
             rows={1}
-            placeholder="Ask about universities, requirements, deadlines…"
+            placeholder="Ask about courses, fees, eligibility, admission process…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -117,7 +115,8 @@ export default function ChatWindow() {
           </button>
         </div>
         <p className="text-xs text-gray-400 text-center mt-2">
-          Press <kbd className="font-mono bg-gray-100 px-1 rounded">Enter</kbd> to send · <kbd className="font-mono bg-gray-100 px-1 rounded">Shift+Enter</kbd> for new line
+          Press <kbd className="font-mono bg-gray-100 px-1 rounded">Enter</kbd> to send ·{' '}
+          <kbd className="font-mono bg-gray-100 px-1 rounded">Shift+Enter</kbd> for new line
         </p>
       </div>
     </div>
