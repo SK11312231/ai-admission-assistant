@@ -8,12 +8,13 @@ import pool, { initDB } from './db';
 import { seed } from './seed';
 import institutesRouter from './routes/institutes';
 import { restoreAllSessions } from './routes/whatsappManager';
+import { startScheduler } from './scheduler';
 import leadsRouter from './routes/leads';
 import webhookRouter from './routes/webhook';
 import chatRouter from './routes/chat';
 
 const app = express();
-app.set('trust proxy', 1); // ← add this line
+app.set('trust proxy', 1);
 const PORT = process.env.PORT ?? 3001;
 
 // Fail fast if DATABASE_URL is not configured
@@ -27,12 +28,11 @@ if (!process.env.DATABASE_URL) {
   process.exit(1);
 }
 
-// Warn early if WhatsApp keys are missing
-if (!process.env.WHATSAPP_API_TOKEN) {
+// Warn early if email is not configured
+if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
   console.warn(
-    '\n⚠️  WHATSAPP_API_TOKEN is not configured.\n' +
-    '   The WhatsApp auto-reply feature will not work until a valid token is set.\n' +
-    '   Add it to server/.env\n',
+    '\n⚠️  EMAIL_USER or EMAIL_PASS is not configured.\n' +
+    '   Email notifications will not work until both are set in Railway variables.\n'
   );
 }
 
@@ -47,20 +47,20 @@ app.use(express.json());
 
 // Rate limiters
 const defaultLimiter = rateLimit({
-  windowMs: 60 * 1000, // 1 minute
-  max: 60,             // 60 requests per minute
+  windowMs: 60 * 1000,
+  max: 60,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: 'Too many requests, please try again later.' },
 });
 
-// API Routes — must be registered BEFORE static file serving
+// API Routes
 app.use('/api/institutes', defaultLimiter, institutesRouter);
 app.use('/api/leads', defaultLimiter, leadsRouter);
 app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/webhook', webhookRouter);
 
-// Health check — verifies DB connectivity
+// Health check
 app.get('/health', defaultLimiter, async (_req, res) => {
   try {
     await pool.query('SELECT 1');
@@ -71,8 +71,7 @@ app.get('/health', defaultLimiter, async (_req, res) => {
   }
 });
 
-// Serve the compiled React frontend (from client/dist, relative to repo root)
-// In production on Railway, process.cwd() is the repo root
+// Serve the compiled React frontend
 const clientDist = path.join(process.cwd(), 'client', 'dist');
 if (!fs.existsSync(clientDist)) {
   console.warn(
@@ -82,18 +81,22 @@ if (!fs.existsSync(clientDist)) {
 }
 app.use(express.static(clientDist));
 
-// SPA fallback — for any non-API route, serve index.html so React Router works
+// SPA fallback
 app.get('*', defaultLimiter, (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(clientDist, 'index.html'));
 });
 
-// Initialise the database schema, seed sample data, then start the server
+// Initialise DB, restore WhatsApp sessions, start scheduler, then listen
 (async () => {
   try {
     await initDB();
-    await restoreAllSessions();
     console.log('✅ Database tables initialised.');
+
+    await restoreAllSessions();
+    console.log('✅ WhatsApp sessions restored.');
+
+    startScheduler();
 
     app.listen(PORT, () => {
       console.log(`Server running on http://localhost:${PORT}`);

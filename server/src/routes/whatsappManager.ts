@@ -2,6 +2,7 @@ import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { getInstituteDetails } from './instituteEnrichment';
+import { sendNewLeadEmail } from './emailService';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +83,25 @@ async function saveLead(
         [instituteId, studentName, studentPhone, message],
       );
       console.log(`[WA] New lead: ${studentPhone}, name: ${studentName ?? 'unknown'}`);
+
+      // Send new lead email notification (fire-and-forget)
+      void (async () => {
+        try {
+          const instResult = await pool.query('SELECT name, email FROM institutes WHERE id = $1', [instituteId]);
+          const inst = instResult.rows[0];
+          if (inst?.email) {
+            await sendNewLeadEmail({
+              toEmail: inst.email as string,
+              instituteName: inst.name as string,
+              studentName,
+              studentPhone,
+              message,
+            });
+          }
+        } catch (err) {
+          console.error('[WA] New lead email failed (non-fatal):', err);
+        }
+      })();
     }
   } catch (err) {
     console.error(`[WA] saveLead failed (non-fatal):`, err);
@@ -267,7 +287,7 @@ export async function initSession(instituteId: string): Promise<void> {
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
       console.log(`[WA] Reply: ${reply ? reply.slice(0, 80) : 'NULL'}`);
       if (!reply) return;
-      await client.sendMessage(msg.from, reply);
+      await client.sendMessage(msg.from, reply, { sendSeen: false });
       console.log(`[WA] ===== REPLY SENT =====`);
     } catch (err) {
       console.error(`[WA] Failed to send reply:`, err);
@@ -307,7 +327,7 @@ export async function sendMessageToStudent(
     return false;
   }
   try {
-    await state.client.sendMessage(toNumber, message);
+    await state.client.sendMessage(toNumber, message, { sendSeen: false });
     console.log(`[WA] Follow-up sent to ${toNumber} for institute ${instituteId}`);
     return true;
   } catch (err) {
