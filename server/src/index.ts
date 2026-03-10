@@ -12,6 +12,7 @@ import { startScheduler } from './scheduler';
 import leadsRouter from './routes/leads';
 import webhookRouter from './routes/webhook';
 import chatRouter from './routes/chat';
+import blocklistRouter from './routes/blocklist';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -58,6 +59,7 @@ const defaultLimiter = rateLimit({
 app.use('/api/institutes', defaultLimiter, institutesRouter);
 app.use('/api/leads', defaultLimiter, leadsRouter);
 app.use('/api/chat', defaultLimiter, chatRouter);
+app.use('/api/blocklist', defaultLimiter, blocklistRouter);
 app.use('/api/webhook', webhookRouter);
 
 // Health check
