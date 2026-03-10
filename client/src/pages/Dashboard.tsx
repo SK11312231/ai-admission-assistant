@@ -224,11 +224,6 @@ export default function Dashboard() {
     localStorage.setItem('institute', JSON.stringify(updated));
   };
 
-  const handleLogout = () => {
-    localStorage.removeItem('institute');
-    navigate('/');
-  };
-
   // ── Profile ─────────────────────────────────────────────────────────────────
   const handleSaveProfile = async () => {
     if (!institute) return;
