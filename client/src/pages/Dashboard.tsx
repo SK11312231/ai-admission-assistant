@@ -87,6 +87,8 @@ export default function Dashboard() {
   const [savingNotes, setSavingNotes] = useState<Record<number, boolean>>({});
   const [savingFollowUp, setSavingFollowUp] = useState<Record<number, boolean>>({});
   const [editingFollowUp, setEditingFollowUp] = useState<Record<number, string>>({});
+  const [sendingFollowUp, setSendingFollowUp] = useState<Record<number, boolean>>({});
+  const [followUpResult, setFollowUpResult] = useState<Record<number, { ok: boolean; msg: string }>>({});
 
   // Add lead modal
   const [showAddLead, setShowAddLead] = useState(false);
@@ -234,6 +236,27 @@ export default function Dashboard() {
     });
     setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, follow_up_date: follow_up_date || null } : l));
     setSavingFollowUp(prev => ({ ...prev, [lead.id]: false }));
+  };
+
+  const sendFollowUp = async (lead: Lead) => {
+    setSendingFollowUp(prev => ({ ...prev, [lead.id]: true }));
+    setFollowUpResult(prev => ({ ...prev, [lead.id]: { ok: false, msg: '' } }));
+    try {
+      const res = await fetch(apiUrl(`/api/leads/${lead.id}/send-followup`), { method: 'POST' });
+      const data = await res.json() as { success?: boolean; message?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to send.');
+      setFollowUpResult(prev => ({ ...prev, [lead.id]: { ok: true, msg: data.message ?? '' } }));
+      // Clear follow-up date after sending
+      await fetch(apiUrl(`/api/leads/${lead.id}/followup`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ follow_up_date: null }),
+      });
+      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, follow_up_date: null } : l));
+    } catch (err) {
+      setFollowUpResult(prev => ({ ...prev, [lead.id]: { ok: false, msg: err instanceof Error ? err.message : 'Failed to send.' } }));
+    } finally {
+      setSendingFollowUp(prev => ({ ...prev, [lead.id]: false }));
+    }
   };
 
   // ── Add lead ────────────────────────────────────────────────────────────────
@@ -536,7 +559,7 @@ export default function Dashboard() {
                           </button>
                         </div>
 
-                        {/* Follow-up */}
+                        {/* Follow-up date + Send button */}
                         <div>
                           <label className="block text-xs font-medium text-gray-700 mb-1">📅 Follow-up Date</label>
                           <input
@@ -550,7 +573,7 @@ export default function Dashboard() {
                               {overdue ? '⚠️ ' : ''}{followUpLabel}
                             </p>
                           )}
-                          <div className="flex gap-2 mt-1.5">
+                          <div className="flex gap-2 mt-1.5 flex-wrap">
                             <button
                               onClick={() => void saveFollowUp(lead)}
                               disabled={savingFollowUp[lead.id]}
@@ -572,6 +595,36 @@ export default function Dashboard() {
                                 className="text-xs border border-gray-300 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100">
                                 Clear
                               </button>
+                            )}
+                          </div>
+
+                          {/* Send Follow-up via WhatsApp */}
+                          <div className="mt-4 pt-3 border-t border-gray-200">
+                            <label className="block text-xs font-medium text-gray-700 mb-1">💬 Send AI Follow-up</label>
+                            <p className="text-xs text-gray-400 mb-2">
+                              AI will generate a personalised follow-up message and send it to the student via WhatsApp instantly.
+                            </p>
+                            <button
+                              onClick={() => void sendFollowUp(lead)}
+                              disabled={sendingFollowUp[lead.id] || !institute?.whatsapp_connected}
+                              className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5">
+                              {sendingFollowUp[lead.id] ? (
+                                <><span className="animate-spin">⏳</span> Sending…</>
+                              ) : (
+                                <>📲 Send Follow-up on WhatsApp</>
+                              )}
+                            </button>
+                            {!institute?.whatsapp_connected && (
+                              <p className="text-xs text-amber-600 mt-1">Connect WhatsApp first to send follow-ups.</p>
+                            )}
+                            {followUpResult[lead.id]?.msg && (
+                              <div className={`mt-2 text-xs rounded-lg px-3 py-2 ${followUpResult[lead.id].ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                {followUpResult[lead.id].ok ? (
+                                  <><span className="font-medium">Sent!</span> "{followUpResult[lead.id].msg.slice(0, 100)}{followUpResult[lead.id].msg.length > 100 ? '…' : ''}"</>
+                                ) : (
+                                  followUpResult[lead.id].msg
+                                )}
+                              </div>
                             )}
                           </div>
                         </div>

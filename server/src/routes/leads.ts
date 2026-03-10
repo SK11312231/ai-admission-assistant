@@ -212,6 +212,107 @@ router.patch('/:id/followup', async (req: Request, res: Response) => {
   }
 });
 
+// ── POST /api/leads/:id/send-followup ────────────────────────────────────────
+// Generates an AI follow-up message and sends it via WhatsApp.
+
+router.post('/:id/send-followup', async (req: Request, res: Response) => {
+  const { id } = req.params;
+
+  try {
+    // Fetch lead details
+    const leadResult = await pool.query(
+      `SELECT l.*, i.name AS institute_name, i.id AS institute_id
+       FROM leads l
+       JOIN institutes i ON i.id = l.institute_id
+       WHERE l.id = $1`,
+      [Number(id)],
+    );
+    const lead = leadResult.rows[0];
+    if (!lead) {
+      res.status(404).json({ error: 'Lead not found.' });
+      return;
+    }
+
+    // Fetch institute details for context
+    const detailsResult = await pool.query(
+      `SELECT institute_data FROM institute_details WHERE institute_id = $1`,
+      [lead.institute_id],
+    );
+    const instituteData: string | null = detailsResult.rows[0]?.institute_data ?? null;
+
+    // Fetch last few messages for context
+    const sessionId = `wa-${lead.institute_id}-${lead.student_phone}`;
+    const historyResult = await pool.query(
+      `SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at DESC LIMIT 6`,
+      [sessionId],
+    );
+    const recentHistory = historyResult.rows.reverse();
+    const historyText = recentHistory.length > 0
+      ? recentHistory.map((m: { role: string; content: string }) => `${m.role === 'user' ? 'Student' : 'AI'}: ${m.content}`).join('\n')
+      : 'No previous conversation.';
+
+    const studentName = lead.student_name ? `named ${lead.student_name}` : '';
+    const contextSection = instituteData
+      ? `Institute info:\n${instituteData.slice(0, 800)}`
+      : `Institute: ${lead.institute_name as string}`;
+
+    const prompt =
+      `You are a follow-up assistant for ${lead.institute_name as string}. ` +
+      `Write a short, warm WhatsApp follow-up message to a student ${studentName} ` +
+      `who previously enquired about admissions but hasn't responded recently.\n\n` +
+      `${contextSection}\n\n` +
+      `Recent conversation:\n${historyText}\n\n` +
+      `Guidelines:\n` +
+      `- Keep it under 3 sentences\n` +
+      `- Be warm and not pushy\n` +
+      `- Reference their previous enquiry if context is available\n` +
+      `- End with an open question to re-engage them\n` +
+      `- Plain text only, no markdown`;
+
+    // Generate follow-up message via Groq
+    const client = getOpenAI();
+    const completion = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{ role: 'user', content: prompt }],
+      temperature: 0.7,
+      max_tokens: 200,
+    });
+
+    const followUpMessage = completion.choices[0]?.message?.content?.trim() || 
+      `Hi! We noticed your enquiry about ${lead.institute_name as string}. We'd love to help you with your admission process. Are you still interested?`;
+
+    // Import sendMessage from whatsappManager to send via WhatsApp
+    const { sendMessageToStudent } = await import('./whatsappManager');
+    const sent = await sendMessageToStudent(
+      String(lead.institute_id),
+      `${lead.student_phone as string}@c.us`,
+      followUpMessage,
+    );
+
+    if (!sent) {
+      res.status(503).json({ error: 'WhatsApp is not connected for this institute. Please connect WhatsApp first.' });
+      return;
+    }
+
+    // Save follow-up message to conversation history
+    await pool.query(
+      'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
+      [sessionId, 'assistant', followUpMessage],
+    );
+
+    // Update lead last_activity_at
+    await pool.query(
+      `UPDATE leads SET last_activity_at = NOW() WHERE id = $1`,
+      [Number(id)],
+    );
+
+    res.json({ success: true, message: followUpMessage });
+  } catch (err) {
+    console.error('Send follow-up error:', err);
+    res.status(500).json({ error: 'Failed to send follow-up message.' });
+  }
+});
+
 // ── Export helper for whatsappManager to create leads with name extraction ───
 
 export async function createLeadFromWhatsApp(

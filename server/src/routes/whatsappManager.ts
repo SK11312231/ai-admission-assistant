@@ -277,6 +277,29 @@ export async function disconnectSession(instituteId: string): Promise<void> {
   await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
 }
 
+// ── Send a message to a student from a connected institute session ────────────
+// Used by the follow-up endpoint in leads.ts
+
+export async function sendMessageToStudent(
+  instituteId: string,
+  toNumber: string, // format: "919876543210@c.us"
+  message: string,
+): Promise<boolean> {
+  const state = sessions.get(instituteId);
+  if (!state || state.status !== 'connected') {
+    console.warn(`[WA] sendMessageToStudent: no active session for institute ${instituteId}`);
+    return false;
+  }
+  try {
+    await state.client.sendMessage(toNumber, message);
+    console.log(`[WA] Follow-up sent to ${toNumber} for institute ${instituteId}`);
+    return true;
+  } catch (err) {
+    console.error(`[WA] sendMessageToStudent failed:`, err);
+    return false;
+  }
+}
+
 export async function restoreAllSessions(): Promise<void> {
   try {
     const result = await pool.query(`SELECT id FROM institutes WHERE whatsapp_connected = TRUE`);
