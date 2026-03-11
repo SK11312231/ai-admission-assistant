@@ -282,6 +282,7 @@ router.patch('/:id/plan', async (req: Request, res: Response) => {
     }
 
     // Mark any pending upgrade requests for this plan as approved
+    
     await pool.query(
       `UPDATE upgrade_requests SET status = 'approved', resolved_at = NOW()
        WHERE institute_id = $1 AND requested_plan = $2 AND status = 'pending'`,
