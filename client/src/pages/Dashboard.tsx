@@ -70,6 +70,10 @@ const STATUS_COLORS: Record<string, string> = {
   lost: 'bg-red-100 text-red-700',
 };
 
+function isPremium(plan: string): boolean {
+  return ['advanced', 'pro'].includes(plan.toLowerCase());
+}
+
 function isOverdue(date: string | null): boolean {
   if (!date) return false;
   const followUp = new Date(date);
@@ -121,7 +125,7 @@ export default function Dashboard() {
   const [peakHours, setPeakHours] = useState<PeakHour[]>([]);
   const [statusBreakdown, setStatusBreakdown] = useState<StatusBreakdown[]>([]);
   const [analyticsLoading, setAnalyticsLoading] = useState(false);
-  const [analyticsPeriod, setAnalyticsPeriod] = useState<7 | 30>(7);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<number>(7);
 
   // ── Blocklist state ──────────────────────────────────────────────────────────
   const [blocklist, setBlocklist] = useState<BlockedNumber[]>([]);
@@ -155,6 +159,13 @@ export default function Dashboard() {
   });
   const [addError, setAddError] = useState<string | null>(null);
   const [addLoading, setAddLoading] = useState(false);
+
+  // Upgrade modal
+  const [showUpgradeModal, setShowUpgradeModal] = useState(false);
+  const [upgrading, setUpgrading] = useState(false);
+  const [upgradeError, setUpgradeError] = useState<string | null>(null);
+  const [upgradeSuccess, setUpgradeSuccess] = useState(false);
+  const [pendingUpgrade, setPendingUpgrade] = useState<{ requested_plan: string; created_at: string } | null>(null);
 
   // ── Initial load ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -197,6 +208,16 @@ export default function Dashboard() {
         if (!res.ok) throw new Error();
         setLeads(await res.json() as Lead[]);
       } catch { /* silent */ }
+
+      // Fetch pending upgrade request
+      try {
+        const res = await fetch(apiUrl(`/api/institutes/${inst.id}/upgrade-request`));
+        if (res.ok) {
+          const data = await res.json() as { requested_plan: string; created_at: string } | null;
+          setPendingUpgrade(data);
+        }
+      } catch { /* silent */ }
+
       finally { setLoading(false); }
     })();
   }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -412,6 +433,29 @@ export default function Dashboard() {
     } finally { setAddLoading(false); }
   };
 
+  // ── Request plan upgrade ────────────────────────────────────────────────────
+  const handleRequestUpgrade = async (plan: 'advanced' | 'pro') => {
+    if (!institute) return;
+    setUpgrading(true);
+    setUpgradeError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/request-upgrade`), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ plan }),
+      });
+      const data = await res.json() as { success?: boolean; requestId?: number; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Request failed.');
+      setPendingUpgrade({ requested_plan: plan, created_at: new Date().toISOString() });
+      setUpgradeSuccess(true);
+      setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 3000);
+    } catch (err) {
+      setUpgradeError(err instanceof Error ? err.message : 'Something went wrong.');
+    } finally {
+      setUpgrading(false);
+    }
+  };
+
   // ── Derived ──────────────────────────────────────────────────────────────────
   const filteredLeads = (filter === 'all' ? leads.filter(l => l.status !== 'lost') : leads.filter(l => l.status === filter));
   const overdueCount = leads.filter(l => isOverdue(l.follow_up_date) && l.status !== 'converted' && l.status !== 'lost').length;
@@ -517,6 +561,126 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* ── Upgrade Modal ───────────────────────────────────────────────────── */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Upgrade Your Plan</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Currently on <span className="font-semibold capitalize text-indigo-600">{institute.plan}</span> plan
+                </p>
+              </div>
+              <button onClick={() => { setShowUpgradeModal(false); setUpgradeError(null); setUpgradeSuccess(false); }}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+
+            {upgradeSuccess ? (
+              <div className="py-10 flex flex-col items-center gap-3 text-center">
+                <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center text-3xl">📨</div>
+                <p className="text-gray-900 font-bold text-lg">Upgrade Request Sent!</p>
+                <p className="text-sm text-gray-500 max-w-xs">
+                  We've notified the InquiAI team. Your plan will be upgraded after review — usually within 24 hours.
+                </p>
+              </div>
+            ) : (
+              <>
+                {pendingUpgrade && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+                    <span className="text-lg mt-0.5">⏳</span>
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Upgrade Request Pending</p>
+                      <p className="text-xs text-amber-700 mt-0.5">
+                        Your request to upgrade to <span className="font-bold capitalize">{pendingUpgrade.requested_plan}</span> is awaiting approval.
+                        We'll notify you once it's processed.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {upgradeError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{upgradeError}</div>
+                )}
+
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {/* Advanced */}
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'advanced' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Advanced</span>
+                      {institute.plan === 'advanced' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {pendingUpgrade?.requested_plan === 'advanced' && institute.plan !== 'advanced' && (
+                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
+                      )}
+                    </div>
+                    <div className="flex items-end gap-1.5 mb-1">
+                      <span className="text-2xl font-extrabold text-gray-900">₹1,499</span>
+                      <span className="text-xs text-gray-400 line-through mb-1">₹2,999</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <ul className="space-y-1.5 flex-1 mb-4">
+                      {['Unlimited leads', 'Analytics dashboard', 'Leads over time & peak hour charts', 'Conversion rate tracking', 'Embeddable chat widget'].map(f => (
+                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
+                          <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={() => void handleRequestUpgrade('advanced')}
+                      disabled={upgrading || institute.plan === 'advanced' || institute.plan === 'pro' || !!pendingUpgrade}
+                      className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                      {upgrading ? 'Submitting…'
+                        : institute.plan === 'advanced' ? 'Current Plan'
+                        : institute.plan === 'pro' ? 'Already on Pro'
+                        : pendingUpgrade?.requested_plan === 'advanced' ? '⏳ Request Pending'
+                        : pendingUpgrade ? 'Another Request Pending'
+                        : 'Request Upgrade →'}
+                    </button>
+                  </div>
+
+                  {/* Pro */}
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-purple-600 uppercase tracking-widest">Pro</span>
+                      {institute.plan === 'pro' && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {pendingUpgrade?.requested_plan === 'pro' && institute.plan !== 'pro' && (
+                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
+                      )}
+                    </div>
+                    <div className="flex items-end gap-1.5 mb-1">
+                      <span className="text-2xl font-extrabold text-gray-900">₹3,499</span>
+                      <span className="text-xs text-gray-400 line-through mb-1">₹4,599</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <ul className="space-y-1.5 flex-1 mb-4">
+                      {['Everything in Advanced', 'Multi-institute admin panel', 'Team accounts & roles', 'Custom AI prompt config', 'API access', 'Dedicated onboarding'].map(f => (
+                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
+                          <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button
+                      onClick={() => void handleRequestUpgrade('pro')}
+                      disabled={upgrading || institute.plan === 'pro' || !!pendingUpgrade}
+                      className="w-full bg-purple-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors">
+                      {upgrading ? 'Submitting…'
+                        : institute.plan === 'pro' ? 'Current Plan'
+                        : pendingUpgrade?.requested_plan === 'pro' ? '⏳ Request Pending'
+                        : pendingUpgrade ? 'Another Request Pending'
+                        : 'Request Upgrade →'}
+                    </button>
+                  </div>
+                </div>
+
+                <p className="text-center text-xs text-gray-400 mt-4">
+                  📩 Your request is reviewed by our team · Usually approved within 24 hours
+                </p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* ── Header ───────────────────────────────────────────────────────────── */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
         <div>
@@ -525,6 +689,11 @@ export default function Dashboard() {
             {institute.email} · {institute.whatsapp_number}
             {institute.website && <> · <a href={institute.website} target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">{institute.website}</a></>}
             {' '}· <span className="bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-0.5 rounded-full uppercase">{institute.plan}</span>
+            {pendingUpgrade && (
+              <span className="ml-1.5 bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">
+                ⏳ {pendingUpgrade.requested_plan.charAt(0).toUpperCase() + pendingUpgrade.requested_plan.slice(1)} upgrade pending
+              </span>
+            )}
           </p>
         </div>
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -826,7 +995,38 @@ export default function Dashboard() {
       {/* ── Analytics Tab ────────────────────────────────────────────────────── */}
       {activeTab === 'analytics' && (
         <div>
-          {analyticsLoading ? (
+          {!isPremium(institute.plan) ? (
+            /* ── Upgrade gate ── */
+            <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📊</div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Analytics is an Advanced Feature</h3>
+              <p className="text-gray-500 text-sm max-w-sm mb-6">
+                Upgrade to the <span className="font-semibold text-indigo-600">Advanced plan</span> to unlock
+                lead trends, peak hour insights, conversion tracking, and more.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll unlock</p>
+                {[
+                  'Leads over time chart (7d / 30d)',
+                  'Peak inquiry hours analysis',
+                  'Status breakdown donut chart',
+                  'Week-on-week growth tracking',
+                  'Conversion rate monitoring',
+                ].map(f => (
+                  <div key={f} className="flex items-center gap-2 mb-2">
+                    <span className="text-indigo-500 font-bold text-xs">✓</span>
+                    <span className="text-sm text-gray-700">{f}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+                className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
+                Upgrade to Advanced — ₹1,499/month →
+              </button>
+              <p className="text-xs text-gray-400 mt-3">Original price ₹2,999/month · Launch discount applied</p>
+            </div>
+          ) : analyticsLoading ? (
             <div className="text-center py-20">
               <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
               <p className="text-sm text-gray-400">Loading analytics…</p>
@@ -840,7 +1040,7 @@ export default function Dashboard() {
                   <p className="text-xs text-gray-500 mt-0.5">Performance overview for your institute.</p>
                 </div>
                 <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
-                  {([7, 30] as const).map(d => (
+                  {([7, 30] as number[]).map(d => (
                     <button key={d} onClick={() => setAnalyticsPeriod(d)}
                       className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${analyticsPeriod === d ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
                       {d === 7 ? '7 Days' : '30 Days'}
@@ -933,7 +1133,7 @@ export default function Dashboard() {
                         <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false} allowDecimals={false} />
                         <Tooltip
                           contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
-                          formatter={(v: number) => [v, 'Leads']}
+                          formatter={(v: unknown) => [v, 'Leads']}
                         />
                         <Bar dataKey="count" name="Leads" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={18} />
                       </BarChart>
