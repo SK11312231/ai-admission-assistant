@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom';
 const features = [
   {
     icon: '📲',
-    title: 'WhatsApp Lead Capture',
+    title: 'WhatsApp InquiAI',
     description: 'Automatically capture every student inquiry that arrives on your institute\'s WhatsApp number.',
   },
   {
@@ -60,7 +60,7 @@ export default function Home() {
       <section className="bg-gradient-to-br from-indigo-600 to-purple-700 text-white py-24 px-4">
         <div className="max-w-3xl mx-auto text-center">
           <span className="inline-block bg-white/20 text-white text-xs font-semibold px-3 py-1 rounded-full mb-6 tracking-wide uppercase">
-            AI-Powered Admission Assistant
+            AI-Powered WhatsApp Admission Assistant
           </span>
           <h1 className="text-4xl sm:text-5xl font-extrabold leading-tight mb-6">
             Capture Leads.<br />Respond Instantly.
@@ -176,9 +176,9 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="bg-gray-900 text-gray-400 py-8 px-4 text-center text-sm">
-        <p className="font-semibold text-white mb-1">LeadCapture</p>
+        <p className="font-semibold text-white mb-1">InquiAI</p>
         <p>AI-powered admission assistant for institutes, coaching centers & universities.</p>
-        <p className="mt-3 text-xs text-gray-600">© {new Date().getFullYear()} LeadCapture. All rights reserved.</p>
+        <p className="mt-3 text-xs text-gray-600">© {new Date().getFullYear()} InquiAI. All rights reserved.</p>
       </footer>
     </div>
   );

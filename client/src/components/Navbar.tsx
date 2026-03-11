@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { Link, NavLink, useNavigate, useLocation } from 'react-router-dom';
+import Logo from './Logo';
 
 export default function Navbar() {
   const navigate = useNavigate();
@@ -26,10 +27,7 @@ export default function Navbar() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
 
         {/* Logo */}
-        <Link to="/" className="flex items-center gap-2 text-indigo-600 font-bold text-lg">
-          <span className="text-2xl">📲</span>
-          <span>LeadCapture</span>
-        </Link>
+        <Link to="/" aria-label="InquiAI home"><Logo size="sm" /></Link>
 
         {/* Nav links */}
         <div className="flex items-center gap-6">

@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import Logo from '../components/Logo';
 import { useNavigate, Link } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 
@@ -42,8 +43,8 @@ export default function Login() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
 
           <div className="text-center mb-8">
-            <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4">
-              <span className="text-white text-2xl font-extrabold">LC</span>
+            <div className="flex justify-center mb-2">
+              <Logo size="md" />
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Welcome Back</h1>
             <p className="text-gray-500 text-sm mt-1">Login to access your institute dashboard</p>

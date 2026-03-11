@@ -38,7 +38,7 @@ function baseTemplate(title: string, body: string): string {
         <!-- Header -->
         <tr>
           <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 32px;">
-            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">🎓 LeadCapture</h1>
+            <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">🎓 InquiAI</h1>
             <p style="margin:4px 0 0;color:#c7d2fe;font-size:13px;">AI Admission Assistant</p>
           </td>
         </tr>
@@ -52,7 +52,7 @@ function baseTemplate(title: string, body: string): string {
         <tr>
           <td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;">
             <p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">
-              This is an automated notification from LeadCapture. Login to your dashboard to manage leads.
+              This is an automated notification from InquiAI. Login to your dashboard to manage leads.
             </p>
           </td>
         </tr>
@@ -97,7 +97,7 @@ export async function sendNewLeadEmail(opts: {
   `;
 
   await getTransporter().sendMail({
-    from: `"LeadCapture" <${process.env.EMAIL_USER}>`,
+    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: `🔔 New Lead: ${name} enquired at ${instituteName}`,
     html: baseTemplate('New Lead', body),
@@ -142,7 +142,7 @@ export async function sendFollowUpDueEmail(opts: {
   `;
 
   await getTransporter().sendMail({
-    from: `"LeadCapture" <${process.env.EMAIL_USER}>`,
+    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: `📅 ${leads.length} Follow-up${leads.length > 1 ? 's' : ''} Due Today — ${instituteName}`,
     html: baseTemplate('Follow-ups Due Today', body),
@@ -187,7 +187,7 @@ export async function sendNoReplyReminderEmail(opts: {
   `;
 
   await getTransporter().sendMail({
-    from: `"LeadCapture" <${process.env.EMAIL_USER}>`,
+    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: `💤 ${leads.length} Student${leads.length > 1 ? 's' : ''} Haven't Replied — ${instituteName}`,
     html: baseTemplate('No Reply Reminder', body),
@@ -241,7 +241,7 @@ export async function sendWeeklySummaryEmail(opts: {
   `;
 
   await getTransporter().sendMail({
-    from: `"LeadCapture" <${process.env.EMAIL_USER}>`,
+    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
     to: toEmail,
     subject: `📊 Weekly Summary — ${instituteName} (${newThisWeek} new leads this week)`,
     html: baseTemplate('Weekly Summary', body),

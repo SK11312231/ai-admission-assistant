@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 60" width="240" height="60" role="img" aria-label="InquiAI logo">
+  <defs>
+    <linearGradient id="inquiai-g" x1="0" y1="0" x2="60" y2="60" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#4F46E5"/>
+      <stop offset="100%" stop-color="#7C3AED"/>
+    </linearGradient>
+    <style>
+      .wm-inqui { font-family: 'Sora', 'Plus Jakarta Sans', system-ui, sans-serif; font-size: 26px; font-weight: 700; fill: #1e1b4b; }
+      .wm-ai    { font-family: 'Sora', 'Plus Jakarta Sans', system-ui, sans-serif; font-size: 26px; font-weight: 800; fill: #4F46E5; }
+    </style>
+  </defs>
+
+  <!-- Icon mark -->
+  <g transform="translate(0, 0)">
+    <rect width="60" height="60" rx="16" fill="url(#inquiai-g)"/>
+    <!-- Graduation cap -->
+    <polygon points="30,10 54,22 30,34 6,22" fill="white" opacity="0.95"/>
+    <!-- Signal arcs -->
+    <path d="M 20 38 Q 20 50 30 50" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="2.5" stroke-linecap="round"/>
+    <path d="M 40 38 Q 40 50 30 50" fill="none" stroke="rgba(255,255,255,0.55)" stroke-width="2.5" stroke-linecap="round"/>
+    <!-- Signal dot -->
+    <circle cx="30" cy="50" r="2.5" fill="white"/>
+    <!-- Tassel -->
+    <line x1="54" y1="22" x2="54" y2="34" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
+    <circle cx="54" cy="37" r="3.5" fill="#fbbf24"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="72" y="38" class="wm-inqui" dominant-baseline="middle">Inqui</text>
+  <text x="130" y="38" class="wm-ai" dominant-baseline="middle">AI</text>
+</svg>
