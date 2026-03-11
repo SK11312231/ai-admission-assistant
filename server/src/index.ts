@@ -14,6 +14,7 @@ import webhookRouter from './routes/webhook';
 import chatRouter from './routes/chat';
 import blocklistRouter from './routes/blocklist';
 import analyticsRouter from './routes/analytics';
+import widgetRouter from './routes/widget';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -44,6 +45,9 @@ const allowedOrigins = [
   'http://localhost:5173',
 ].filter(Boolean) as string[];
 
+// Widget routes need open CORS — they're embedded on external institute websites
+app.use('/api/widget', cors({ origin: '*' }));
+
 app.use(cors({ origin: allowedOrigins, credentials: true }));
 app.use(express.json());
 
@@ -62,6 +66,7 @@ app.use('/api/leads', defaultLimiter, leadsRouter);
 app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/blocklist', defaultLimiter, blocklistRouter);
 app.use('/api/analytics', defaultLimiter, analyticsRouter);
+app.use('/api/widget', widgetRouter);
 app.use('/api/webhook', webhookRouter);
 
 // Health check

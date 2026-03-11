@@ -59,7 +59,7 @@ interface PeakHour { hour: number; label: string; count: number; }
 interface StatusBreakdown { name: string; value: number; color: string; }
 
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
-type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist';
+type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -166,6 +166,9 @@ export default function Dashboard() {
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [upgradeSuccess, setUpgradeSuccess] = useState(false);
   const [pendingUpgrade, setPendingUpgrade] = useState<{ requested_plan: string; created_at: string } | null>(null);
+
+  // Widget tab
+  const [widgetCopied, setWidgetCopied] = useState(false);
 
   // ── Initial load ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -756,11 +759,15 @@ export default function Dashboard() {
       </div>
 
       {/* ── Tabs ─────────────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 mb-6 border-b border-gray-200">
-        {(['leads', 'analytics', 'profile', 'blocklist'] as Tab[]).map(tab => (
+      <div className="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
+        {(['leads', 'analytics', 'widget', 'profile', 'blocklist'] as Tab[]).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {tab === 'leads' ? '📋 Leads' : tab === 'analytics' ? '📊 Analytics' : tab === 'profile' ? '🏫 Institute Profile' : '🚫 Blocklist'}
+            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            {tab === 'leads' ? '📋 Leads'
+              : tab === 'analytics' ? '📊 Analytics'
+              : tab === 'widget' ? '💬 Chat Widget'
+              : tab === 'profile' ? '🏫 Institute Profile'
+              : '🚫 Blocklist'}
           </button>
         ))}
       </div>
@@ -1279,6 +1286,142 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Widget Tab ───────────────────────────────────────────────────────── */}
+      {activeTab === 'widget' && (
+        <div>
+          {!isPremium(institute.plan) ? (
+            /* ── Upgrade gate ── */
+            <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+              <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">💬</div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is an Advanced Feature</h3>
+              <p className="text-gray-500 text-sm max-w-sm mb-6">
+                Upgrade to the <span className="font-semibold text-indigo-600">Advanced plan</span> to embed
+                an AI-powered chat widget directly on your institute's website.
+              </p>
+              <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
+                {[
+                  'Floating chat bubble on your website',
+                  'AI replies using your institute profile',
+                  'Student conversations saved as leads',
+                  'Typing indicator & mobile responsive',
+                  'One-line embed — no coding needed',
+                ].map(f => (
+                  <div key={f} className="flex items-center gap-2 mb-2">
+                    <span className="text-indigo-500 font-bold text-xs">✓</span>
+                    <span className="text-sm text-gray-700">{f}</span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+                className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
+                Upgrade to Advanced — ₹1,499/month →
+              </button>
+            </div>
+          ) : (
+            <>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-6">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Chat Widget</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Embed an AI chat assistant on your institute's website. Students can ask questions instantly.</p>
+                </div>
+                <span className="flex-shrink-0 text-xs bg-green-50 border border-green-200 text-green-700 font-semibold px-3 py-1.5 rounded-full">
+                  ✅ Active on your plan
+                </span>
+              </div>
+
+              {/* Embed code */}
+              <div className="bg-gray-900 rounded-2xl p-5 mb-6">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Embed Code</p>
+                  <button
+                    onClick={() => {
+                      void navigator.clipboard.writeText(
+                        `<script src="${apiUrl(`/api/widget/${institute.id}/widget.js`)}" defer><\/script>`
+                      ).then(() => {
+                        setWidgetCopied(true);
+                        setTimeout(() => setWidgetCopied(false), 2500);
+                      });
+                    }}
+                    className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${widgetCopied ? 'bg-green-500 text-white' : 'bg-gray-700 text-gray-200 hover:bg-gray-600'}`}>
+                    {widgetCopied ? '✅ Copied!' : '📋 Copy'}
+                  </button>
+                </div>
+                <code className="text-sm text-green-400 font-mono break-all">
+                  {`<script src="${apiUrl(`/api/widget/${institute.id}/widget.js`)}" defer></script>`}
+                </code>
+              </div>
+
+              {/* Installation steps */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-5 mb-6">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">How to install</h3>
+                <div className="space-y-4">
+                  {[
+                    { step: '1', title: 'Copy the embed code above', desc: 'Click the "Copy" button to copy the single-line script tag.' },
+                    { step: '2', title: 'Paste before </body> on your website', desc: 'Open your website\'s HTML and paste the code just before the closing </body> tag on every page where you want the widget.' },
+                    { step: '3', title: 'Save and publish', desc: 'That\'s it! The chat bubble will appear on the bottom-right of your site. Students can start chatting immediately.' },
+                  ].map(item => (
+                    <div key={item.step} className="flex gap-4">
+                      <div className="w-8 h-8 bg-indigo-600 text-white rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0">{item.step}</div>
+                      <div>
+                        <p className="text-sm font-semibold text-gray-900">{item.title}</p>
+                        <p className="text-xs text-gray-500 mt-0.5">{item.desc}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Widget preview */}
+              <div className="bg-gradient-to-br from-indigo-50 to-purple-50 border border-indigo-100 rounded-2xl p-5">
+                <h3 className="text-sm font-semibold text-gray-900 mb-4">Widget Preview</h3>
+                <div className="flex items-end gap-4 flex-wrap">
+                  {/* Bubble preview */}
+                  <div className="flex flex-col items-center gap-2">
+                    <div className="w-14 h-14 rounded-full flex items-center justify-center text-2xl shadow-lg"
+                      style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+                      💬
+                    </div>
+                    <p className="text-xs text-gray-500">Chat bubble</p>
+                  </div>
+
+                  {/* Panel preview */}
+                  <div className="bg-white rounded-xl shadow-lg border border-gray-100 overflow-hidden w-52">
+                    <div className="px-3 py-2.5 flex items-center gap-2" style={{ background: 'linear-gradient(135deg, #4f46e5, #7c3aed)' }}>
+                      <span className="text-base">🎓</span>
+                      <div>
+                        <p className="text-white text-xs font-bold truncate">{institute.name}</p>
+                        <p className="text-indigo-200 text-[10px]">AI Assistant · Replies instantly</p>
+                      </div>
+                    </div>
+                    <div className="p-3 bg-gray-50 space-y-2">
+                      <div className="bg-white border border-gray-100 rounded-xl rounded-tl-sm px-3 py-2 text-[11px] text-gray-700 shadow-sm">
+                        Hi! 👋 How can I help you with admissions today?
+                      </div>
+                      <div className="bg-indigo-600 rounded-xl rounded-tr-sm px-3 py-2 text-[11px] text-white ml-6">
+                        What courses do you offer?
+                      </div>
+                    </div>
+                    <div className="px-3 py-2 border-t border-gray-100 flex items-center gap-2">
+                      <div className="flex-1 bg-gray-100 rounded-full h-6 text-[10px] text-gray-400 flex items-center px-3">Ask a question…</div>
+                      <div className="w-6 h-6 bg-indigo-600 rounded-full flex items-center justify-center text-white text-[10px]">➤</div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="mt-4 p-3 bg-white/70 rounded-xl border border-indigo-100">
+                  <p className="text-xs text-gray-600">
+                    <span className="font-semibold">💡 Tip:</span> Make sure your <span className="font-medium">Institute Profile</span> is filled in — the AI uses it to answer student questions accurately.
+                    <button onClick={() => setActiveTab('profile')} className="text-indigo-600 hover:underline ml-1 font-medium">Go to Profile →</button>
+                  </p>
+                </div>
+              </div>
+            </>
           )}
         </div>
       )}
