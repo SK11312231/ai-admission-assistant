@@ -1133,7 +1133,7 @@ export default function Dashboard() {
                         <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false} allowDecimals={false} />
                         <Tooltip
                           contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
-                          formatter={(v: number) => [v, 'Leads'] as [number, string]}
+                          formatter={(v) => [v as number, 'Leads'] as [number, string]}
                         />
                         <Bar dataKey="count" name="Leads" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={18} />
                       </BarChart>
