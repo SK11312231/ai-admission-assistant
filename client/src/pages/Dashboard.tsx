@@ -1,4 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
+  XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+} from 'recharts';
 import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 
@@ -42,8 +46,20 @@ interface BlockedNumber {
   created_at: string;
 }
 
+interface AnalyticsOverview {
+  totalLeads: number;
+  conversionRate: number;
+  thisWeekLeads: number;
+  weekGrowth: number | null;
+  byStatus: Record<string, number>;
+}
+
+interface LeadsOverTime { label: string; count: number; }
+interface PeakHour { hour: number; label: string; count: number; }
+interface StatusBreakdown { name: string; value: number; color: string; }
+
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
-type Tab = 'leads' | 'profile' | 'blocklist';
+type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -98,6 +114,14 @@ export default function Dashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [reEnriching, setReEnriching] = useState(false);
+
+  // ── Analytics state ─────────────────────────────────────────────────────────
+  const [analyticsOverview, setAnalyticsOverview] = useState<AnalyticsOverview | null>(null);
+  const [leadsOverTime, setLeadsOverTime] = useState<LeadsOverTime[]>([]);
+  const [peakHours, setPeakHours] = useState<PeakHour[]>([]);
+  const [statusBreakdown, setStatusBreakdown] = useState<StatusBreakdown[]>([]);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsPeriod, setAnalyticsPeriod] = useState<7 | 30>(7);
 
   // ── Blocklist state ──────────────────────────────────────────────────────────
   const [blocklist, setBlocklist] = useState<BlockedNumber[]>([]);
@@ -190,6 +214,26 @@ export default function Dashboard() {
       finally { setProfileLoading(false); }
     })();
   }, [activeTab, institute]);
+
+  useEffect(() => {
+    if (activeTab !== 'analytics' || !institute) return;
+    setAnalyticsLoading(true);
+    const id = institute.id;
+    Promise.all([
+      fetch(apiUrl(`/api/analytics/${id}/overview`)).then(r => r.json()) as Promise<AnalyticsOverview>,
+      fetch(apiUrl(`/api/analytics/${id}/leads-over-time?days=${analyticsPeriod}`)).then(r => r.json()) as Promise<LeadsOverTime[]>,
+      fetch(apiUrl(`/api/analytics/${id}/peak-hours`)).then(r => r.json()) as Promise<PeakHour[]>,
+      fetch(apiUrl(`/api/analytics/${id}/status-breakdown`)).then(r => r.json()) as Promise<StatusBreakdown[]>,
+    ])
+      .then(([overview, lot, peak, status]) => {
+        setAnalyticsOverview(overview);
+        setLeadsOverTime(lot);
+        setPeakHours(peak);
+        setStatusBreakdown(status);
+      })
+      .catch(err => console.error('Analytics fetch error:', err))
+      .finally(() => setAnalyticsLoading(false));
+  }, [activeTab, institute, analyticsPeriod]);
 
   useEffect(() => {
     if (activeTab !== 'blocklist' || !institute) return;
@@ -544,10 +588,10 @@ export default function Dashboard() {
 
       {/* ── Tabs ─────────────────────────────────────────────────────────────── */}
       <div className="flex gap-1 mb-6 border-b border-gray-200">
-        {(['leads', 'profile', 'blocklist'] as Tab[]).map(tab => (
+        {(['leads', 'analytics', 'profile', 'blocklist'] as Tab[]).map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)}
             className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px ${activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {tab === 'leads' ? '📋 Leads' : tab === 'profile' ? '🏫 Institute Profile' : '🚫 Blocklist'}
+            {tab === 'leads' ? '📋 Leads' : tab === 'analytics' ? '📊 Analytics' : tab === 'profile' ? '🏫 Institute Profile' : '🚫 Blocklist'}
           </button>
         ))}
       </div>
@@ -777,6 +821,166 @@ export default function Dashboard() {
             </div>
           )}
         </>
+      )}
+
+      {/* ── Analytics Tab ────────────────────────────────────────────────────── */}
+      {activeTab === 'analytics' && (
+        <div>
+          {analyticsLoading ? (
+            <div className="text-center py-20">
+              <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
+              <p className="text-sm text-gray-400">Loading analytics…</p>
+            </div>
+          ) : (
+            <>
+              {/* Period toggle */}
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className="text-base font-semibold text-gray-900">Analytics</h2>
+                  <p className="text-xs text-gray-500 mt-0.5">Performance overview for your institute.</p>
+                </div>
+                <div className="flex gap-1 bg-gray-100 p-1 rounded-lg">
+                  {([7, 30] as const).map(d => (
+                    <button key={d} onClick={() => setAnalyticsPeriod(d)}
+                      className={`px-3 py-1 text-xs font-semibold rounded-md transition-colors ${analyticsPeriod === d ? 'bg-white text-indigo-600 shadow-sm' : 'text-gray-500 hover:text-gray-700'}`}>
+                      {d === 7 ? '7 Days' : '30 Days'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* KPI Cards */}
+              {analyticsOverview && (
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
+                  {[
+                    {
+                      label: 'Total Leads',
+                      value: analyticsOverview.totalLeads,
+                      sub: 'All time',
+                      color: 'text-indigo-600',
+                      bg: 'bg-indigo-50',
+                    },
+                    {
+                      label: 'This Week',
+                      value: analyticsOverview.thisWeekLeads,
+                      sub: analyticsOverview.weekGrowth !== null
+                        ? `${analyticsOverview.weekGrowth >= 0 ? '+' : ''}${analyticsOverview.weekGrowth}% vs last week`
+                        : 'vs last week',
+                      color: 'text-amber-600',
+                      bg: 'bg-amber-50',
+                    },
+                    {
+                      label: 'Converted',
+                      value: analyticsOverview.byStatus['converted'] ?? 0,
+                      sub: 'Total conversions',
+                      color: 'text-green-600',
+                      bg: 'bg-green-50',
+                    },
+                    {
+                      label: 'Conversion Rate',
+                      value: `${analyticsOverview.conversionRate}%`,
+                      sub: 'Inquiries → admissions',
+                      color: 'text-purple-600',
+                      bg: 'bg-purple-50',
+                    },
+                  ].map(card => (
+                    <div key={card.label} className={`${card.bg} rounded-xl p-4 border border-white`}>
+                      <p className={`text-2xl font-bold ${card.color}`}>{card.value}</p>
+                      <p className="text-xs font-semibold text-gray-700 mt-1">{card.label}</p>
+                      <p className="text-xs text-gray-400 mt-0.5">{card.sub}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Leads Over Time */}
+              <div className="bg-white border border-gray-200 rounded-xl p-5 mb-5">
+                <h3 className="text-sm font-semibold text-gray-800 mb-4">
+                  Leads Over Time <span className="text-gray-400 font-normal">— last {analyticsPeriod} days</span>
+                </h3>
+                {leadsOverTime.length === 0 || leadsOverTime.every(d => d.count === 0) ? (
+                  <div className="text-center py-10 text-gray-400 text-sm">No lead data yet for this period.</div>
+                ) : (
+                  <ResponsiveContainer width="100%" height={200}>
+                    <LineChart data={leadsOverTime} margin={{ top: 4, right: 8, left: -20, bottom: 0 }}>
+                      <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
+                      <XAxis dataKey="label" tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} interval="preserveStartEnd" />
+                      <YAxis tick={{ fontSize: 10, fill: '#94a3b8' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                      <Tooltip
+                        contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0', boxShadow: '0 2px 8px rgba(0,0,0,0.08)' }}
+                        labelStyle={{ fontWeight: 600 }}
+                      />
+                      <Line type="monotone" dataKey="count" name="Leads" stroke="#6366f1" strokeWidth={2.5} dot={{ r: 3, fill: '#6366f1' }} activeDot={{ r: 5 }} />
+                    </LineChart>
+                  </ResponsiveContainer>
+                )}
+              </div>
+
+              {/* Peak Hours + Status Breakdown — side by side */}
+              <div className="grid sm:grid-cols-2 gap-5">
+
+                {/* Peak Hours */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-1">Peak Inquiry Hours</h3>
+                  <p className="text-xs text-gray-400 mb-4">When students message most (IST)</p>
+                  {peakHours.every(h => h.count === 0) ? (
+                    <div className="text-center py-10 text-gray-400 text-sm">No data yet.</div>
+                  ) : (
+                    <ResponsiveContainer width="100%" height={180}>
+                      <BarChart data={peakHours} margin={{ top: 4, right: 4, left: -24, bottom: 0 }}>
+                        <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false}
+                          interval={2} />
+                        <YAxis tick={{ fontSize: 9, fill: '#94a3b8' }} tickLine={false} axisLine={false} allowDecimals={false} />
+                        <Tooltip
+                          contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                          formatter={(v: number) => [v, 'Leads']}
+                        />
+                        <Bar dataKey="count" name="Leads" fill="#6366f1" radius={[4, 4, 0, 0]} maxBarSize={18} />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
+                </div>
+
+                {/* Status Breakdown */}
+                <div className="bg-white border border-gray-200 rounded-xl p-5">
+                  <h3 className="text-sm font-semibold text-gray-800 mb-1">Status Breakdown</h3>
+                  <p className="text-xs text-gray-400 mb-4">Distribution of all leads by status</p>
+                  {statusBreakdown.length === 0 ? (
+                    <div className="text-center py-10 text-gray-400 text-sm">No leads yet.</div>
+                  ) : (
+                    <div className="flex items-center gap-4">
+                      <ResponsiveContainer width="55%" height={160}>
+                        <PieChart>
+                          <Pie
+                            data={statusBreakdown} cx="50%" cy="50%"
+                            innerRadius={45} outerRadius={70}
+                            dataKey="value" strokeWidth={2} stroke="#fff"
+                          >
+                            {statusBreakdown.map((entry, i) => (
+                              <Cell key={i} fill={entry.color} />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
+                      <div className="flex flex-col gap-2 flex-1">
+                        {statusBreakdown.map(entry => (
+                          <div key={entry.name} className="flex items-center gap-2">
+                            <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ background: entry.color }} />
+                            <span className="text-xs text-gray-600 flex-1">{entry.name}</span>
+                            <span className="text-xs font-semibold text-gray-800">{entry.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
       )}
 
       {/* ── Blocklist Tab ─────────────────────────────────────────────────────── */}
