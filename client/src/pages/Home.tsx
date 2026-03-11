@@ -36,19 +36,54 @@ const features = [
 const plans = [
   {
     name: 'Free',
+    badge: '30 Days Free',
     price: '₹0',
-    features: ['Up to 50 leads/month', 'Basic dashboard', 'WhatsApp AI auto-reply', 'Email notifications'],
+    originalPrice: null,
+    duration: '30 days, no credit card',
+    description: 'Full access to all core features. No limits during trial.',
+    features: [
+      { text: 'Unlimited leads for 30 days', core: true },
+      { text: 'WhatsApp AI auto-reply (24/7)', core: true },
+      { text: 'Lead dashboard & status tracking', core: true },
+      { text: 'Conversation history per lead', core: true },
+      { text: 'Notes & follow-up management', core: true },
+      { text: 'Email notifications', core: true },
+      { text: 'Blocklist management', core: true },
+      { text: 'AI knowledge base (website enrichment)', core: true },
+    ],
   },
   {
     name: 'Advanced',
-    price: '₹999',
-    features: ['Up to 500 leads/month', 'Advanced analytics', 'Priority support', 'WhatsApp AI auto-reply', 'Conversation history'],
+    badge: 'Most Popular',
+    price: '₹1,499',
+    originalPrice: '₹2,999',
+    duration: 'per month',
+    description: 'Everything in Free, plus powerful analytics and chat widget.',
     popular: true,
+    features: [
+      { text: 'Everything in Free — unlimited leads', core: true },
+      { text: 'Analytics dashboard', core: false },
+      { text: 'Leads over time & peak hour charts', core: false },
+      { text: 'Conversion rate tracking', core: false },
+      { text: 'Embeddable website chat widget', core: false },
+      { text: 'Priority email support', core: true },
+    ],
   },
   {
     name: 'Pro',
-    price: '₹2,499',
-    features: ['Unlimited leads', 'Custom AI prompts', 'API access', 'Dedicated support', 'Team accounts'],
+    badge: 'Full Power',
+    price: '₹3,499',
+    originalPrice: '₹4,599',
+    duration: 'per month',
+    description: 'For growing institutes managing multiple campuses or admins.',
+    features: [
+      { text: 'Everything in Advanced', core: true },
+      { text: 'Multi-institute admin panel', core: false },
+      { text: 'Team accounts & role management', core: false },
+      { text: 'Custom AI prompt configuration', core: false },
+      { text: 'API access', core: false },
+      { text: 'Dedicated support & onboarding', core: true },
+    ],
   },
 ];
 
@@ -130,30 +165,79 @@ export default function Home() {
       {/* Plans */}
       <section className="py-20 px-4 bg-white">
         <div className="max-w-5xl mx-auto">
-          <h2 className="text-3xl font-bold text-center text-gray-900 mb-4">Choose Your Plan</h2>
-          <p className="text-center text-gray-500 mb-12 max-w-lg mx-auto">Start free, upgrade as you grow.</p>
-          <div className="grid sm:grid-cols-3 gap-6">
+          <h2 className="text-3xl font-bold text-center text-gray-900 mb-3">Simple, Transparent Pricing</h2>
+          <p className="text-center text-gray-500 mb-3 max-w-lg mx-auto">Start free for 30 days. No credit card required.</p>
+          <p className="text-center mb-12">
+            <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-1 rounded-full">
+              🎉 Launch offer — prices shown are discounted from original
+            </span>
+          </p>
+          <div className="grid sm:grid-cols-3 gap-6 items-start">
             {plans.map((plan) => (
               <div key={plan.name}
-                className={`rounded-2xl p-6 border flex flex-col ${plan.popular ? 'border-indigo-400 bg-indigo-50 ring-2 ring-indigo-200' : 'border-gray-200 bg-white'}`}>
-                {plan.popular && (
-                  <span className="text-xs font-bold text-indigo-600 uppercase tracking-wide mb-2">⭐ Most Popular</span>
-                )}
-                <h3 className="text-xl font-bold text-gray-900">{plan.name}</h3>
-                <p className="text-3xl font-extrabold text-gray-900 mt-2 mb-4">
-                  {plan.price}<span className="text-sm font-normal text-gray-500">/month</span>
-                </p>
-                <ul className="space-y-2 mb-6 flex-1">
-                  {plan.features.map((f) => (
-                    <li key={f} className="text-sm text-gray-600 flex items-center gap-2">
-                      <span className="text-green-500 font-bold">✓</span> {f}
-                    </li>
-                  ))}
-                </ul>
-                <Link to="/register"
-                  className={`text-center py-2.5 rounded-xl text-sm font-semibold transition-colors ${plan.popular ? 'bg-indigo-600 text-white hover:bg-indigo-700' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'}`}>
-                  Get Started
-                </Link>
+                className={`rounded-2xl border flex flex-col overflow-hidden ${
+                  plan.popular
+                    ? 'border-indigo-400 ring-2 ring-indigo-200 shadow-lg shadow-indigo-100'
+                    : 'border-gray-200'
+                }`}>
+
+                {/* Card header */}
+                <div className={`px-6 pt-6 pb-5 ${plan.popular ? 'bg-indigo-600' : 'bg-gray-50'}`}>
+                  <span className={`text-xs font-bold uppercase tracking-widest ${plan.popular ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                    {plan.badge}
+                  </span>
+                  <h3 className={`text-xl font-bold mt-1 ${plan.popular ? 'text-white' : 'text-gray-900'}`}>{plan.name}</h3>
+                  <p className={`text-xs mt-1 mb-4 ${plan.popular ? 'text-indigo-200' : 'text-gray-500'}`}>{plan.description}</p>
+
+                  {/* Price */}
+                  <div className="flex items-end gap-2">
+                    <span className={`text-4xl font-extrabold leading-none ${plan.popular ? 'text-white' : 'text-gray-900'}`}>
+                      {plan.price}
+                    </span>
+                    {plan.originalPrice && (
+                      <span className={`text-sm line-through mb-1 ${plan.popular ? 'text-indigo-300' : 'text-gray-400'}`}>
+                        {plan.originalPrice}
+                      </span>
+                    )}
+                  </div>
+                  <p className={`text-xs mt-1 ${plan.popular ? 'text-indigo-200' : 'text-gray-400'}`}>{plan.duration}</p>
+                </div>
+
+                {/* Features */}
+                <div className="px-6 py-5 bg-white flex-1">
+                  <ul className="space-y-2.5">
+                    {plan.features.map((f) => (
+                      <li key={f.text} className="flex items-start gap-2 text-sm">
+                        <span className={`mt-0.5 flex-shrink-0 font-bold ${f.core ? 'text-green-500' : 'text-indigo-500'}`}>✓</span>
+                        <span className={f.core ? 'text-gray-700' : 'text-gray-700'}>
+                          {f.text}
+                          {!f.core && (
+                            <span className="ml-1.5 text-xs bg-indigo-50 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">
+                              New
+                            </span>
+                          )}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                {/* CTA */}
+                <div className="px-6 pb-6 bg-white">
+                  <Link to="/register"
+                    className={`block text-center py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                      plan.popular
+                        ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    }`}>
+                    {plan.name === 'Free' ? 'Start Free Trial →' : 'Get Started →'}
+                  </Link>
+                  {plan.originalPrice && (
+                    <p className="text-center text-xs text-gray-400 mt-2">
+                      Save {plan.name === 'Advanced' ? '₹1,500' : '₹1,100'}/month vs original price
+                    </p>
+                  )}
+                </div>
               </div>
             ))}
           </div>
