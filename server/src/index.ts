@@ -90,7 +90,20 @@ if (!fs.existsSync(clientDist)) {
 }
 app.use(express.static(clientDist));
 
-// SPA fallback
+// Serve the admin panel at /admin
+const adminDist = path.join(process.cwd(), 'admin', 'dist');
+if (!fs.existsSync(adminDist)) {
+  console.warn(
+    `\n⚠️  admin/dist not found at ${adminDist}.\n` +
+    '   Run "npm run build" inside the admin/ folder.\n'
+  );
+}
+app.use('/admin', express.static(adminDist));
+
+// SPA fallback — admin routes first, then main app
+app.get('/admin/*', defaultLimiter, (_req, res) => {
+  res.sendFile(path.join(adminDist, 'index.html'));
+});
 app.get('*', defaultLimiter, (req, res, next) => {
   if (req.path.startsWith('/api/')) return next();
   res.sendFile(path.join(clientDist, 'index.html'));
