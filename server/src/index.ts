@@ -95,6 +95,15 @@ app.get('*', defaultLimiter, (req, res, next) => {
     await initDB();
     console.log('✅ Database tables initialised.');
 
+    // Migration: update plan check constraint from 'advance' → 'advanced'
+    try {
+      await pool.query(`ALTER TABLE institutes DROP CONSTRAINT IF EXISTS institutes_plan_check`);
+      await pool.query(`ALTER TABLE institutes ADD CONSTRAINT institutes_plan_check CHECK (plan IN ('free', 'advanced', 'pro'))`);
+      console.log('✅ Plan constraint migrated.');
+    } catch (err) {
+      console.warn('⚠️  Plan constraint migration skipped (table may not exist yet):', err);
+    }
+
     await restoreAllSessions();
     console.log('✅ WhatsApp sessions restored.');
 
