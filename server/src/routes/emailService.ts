@@ -249,3 +249,71 @@ export async function sendWeeklySummaryEmail(opts: {
 
   console.log(`[Email] Weekly summary sent to ${toEmail}`);
 }
+
+// ── 5. Upgrade Plan Request (Admin Notification) ─────────────────────────────
+
+export async function sendUpgradeRequestEmail(opts: {
+  adminEmail: string;
+  instituteName: string;
+  instituteEmail: string;
+  institutePhone: string;
+  currentPlan: string;
+  requestedPlan: string;
+  requestId: number;
+  dashboardUrl?: string;
+}): Promise<void> {
+  const {
+    adminEmail,
+    instituteName,
+    instituteEmail,
+    institutePhone,
+    currentPlan,
+    requestedPlan,
+    requestId,
+    dashboardUrl = 'https://ai-admission-assistant-production.up.railway.app',
+  } = opts;
+
+  const planLabel = requestedPlan.charAt(0).toUpperCase() + requestedPlan.slice(1);
+  const currentLabel = currentPlan.charAt(0).toUpperCase() + currentPlan.slice(1);
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">⬆️ Plan Upgrade Request</h2>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">
+      An institute has requested to upgrade their plan. Please review and action this request.
+    </p>
+
+    ${infoBox(`
+      <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1f2937;">🏫 ${instituteName}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">📧 ${instituteEmail}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">📱 ${institutePhone}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Request ID: <strong>#${requestId}</strong></p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
+      <p style="margin:0 0 4px;font-size:13px;color:#374151;">
+        Current Plan: <span style="background:#f3f4f6;color:#374151;padding:2px 8px;border-radius:4px;font-weight:600;">${currentLabel}</span>
+      </p>
+      <p style="margin:8px 0 0;font-size:14px;color:#374151;">
+        Requested Plan: <span style="background:#ede9fe;color:#4f46e5;padding:2px 8px;border-radius:4px;font-weight:700;">${planLabel}</span>
+      </p>
+    `, '#f59e0b')}
+
+    <p style="color:#6b7280;font-size:13px;margin-top:20px;">
+      To approve this upgrade, update the institute's plan in your admin panel or run the following:
+    </p>
+    <div style="background:#1f2937;border-radius:8px;padding:14px 18px;margin:12px 0;">
+      <code style="color:#a5f3fc;font-size:12px;font-family:monospace;">
+        PATCH /api/institutes/&lt;id&gt;/plan  →  { "plan": "${requestedPlan}" }
+      </code>
+    </div>
+
+    ${button('Open Dashboard →', dashboardUrl)}
+  `;
+
+  await getTransporter().sendMail({
+    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
+    to: adminEmail,
+    subject: `⬆️ Upgrade Request: ${instituteName} → ${planLabel} Plan`,
+    html: baseTemplate('Plan Upgrade Request', body),
+  });
+
+  console.log(`[Email] Upgrade request email sent to admin (${adminEmail}) for institute: ${instituteName}`);
+}

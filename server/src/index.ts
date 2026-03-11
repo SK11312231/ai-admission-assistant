@@ -13,6 +13,7 @@ import leadsRouter from './routes/leads';
 import webhookRouter from './routes/webhook';
 import chatRouter from './routes/chat';
 import blocklistRouter from './routes/blocklist';
+import analyticsRouter from './routes/analytics';
 
 const app = express();
 app.set('trust proxy', 1);
@@ -60,6 +61,7 @@ app.use('/api/institutes', defaultLimiter, institutesRouter);
 app.use('/api/leads', defaultLimiter, leadsRouter);
 app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/blocklist', defaultLimiter, blocklistRouter);
+app.use('/api/analytics', defaultLimiter, analyticsRouter);
 app.use('/api/webhook', webhookRouter);
 
 // Health check

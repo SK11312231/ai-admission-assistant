@@ -258,6 +258,158 @@ router.get('/:id/whatsapp-status', async (req: Request, res: Response) => {
   }
 });
 
+// PATCH /api/institutes/:id/plan
+// Admin-only: directly sets the plan after manual approval of an upgrade request.
+router.patch('/:id/plan', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { plan } = req.body as { plan?: string };
+
+  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
+    return;
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE institutes SET plan = $1 WHERE id = $2
+       RETURNING id, name, email, phone, whatsapp_number, website, plan, whatsapp_connected`,
+      [plan, Number(id)],
+    );
+
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: 'Institute not found.' });
+      return;
+    }
+
+    // Mark any pending upgrade requests for this plan as approved
+    await pool.query(
+      `UPDATE upgrade_requests SET status = 'approved', resolved_at = NOW()
+       WHERE institute_id = $1 AND requested_plan = $2 AND status = 'pending'`,
+      [Number(id), plan],
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Update plan error:', err);
+    res.status(500).json({ error: 'Failed to update plan.' });
+  }
+});
+
+// POST /api/institutes/:id/request-upgrade
+// Institute requests a plan upgrade — saves request to DB and notifies admin by email.
+router.post('/:id/request-upgrade', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { plan } = req.body as { plan?: string };
+
+  if (!plan || !['advanced', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Requested plan must be advanced or pro.' });
+    return;
+  }
+
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS upgrade_requests (
+        id             SERIAL PRIMARY KEY,
+        institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+        requested_plan TEXT NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at    TIMESTAMPTZ
+      )
+    `);
+
+    // Fetch institute details
+    const instResult = await pool.query(
+      `SELECT id, name, email, phone, plan FROM institutes WHERE id = $1`,
+      [Number(id)],
+    );
+    const inst = instResult.rows[0] as {
+      id: number; name: string; email: string; phone: string; plan: string;
+    } | undefined;
+
+    if (!inst) {
+      res.status(404).json({ error: 'Institute not found.' });
+      return;
+    }
+
+    // Don't allow requesting the same or lower plan
+    if (inst.plan === plan) {
+      res.status(400).json({ error: 'You are already on this plan.' });
+      return;
+    }
+
+    // Check for existing pending request
+    const existing = await pool.query(
+      `SELECT id FROM upgrade_requests
+       WHERE institute_id = $1 AND requested_plan = $2 AND status = 'pending'`,
+      [Number(id), plan],
+    );
+    if ((existing.rowCount ?? 0) > 0) {
+      res.status(409).json({ error: 'An upgrade request for this plan is already pending approval.' });
+      return;
+    }
+
+    // Insert request record
+    const reqResult = await pool.query(
+      `INSERT INTO upgrade_requests (institute_id, requested_plan, status)
+       VALUES ($1, $2, 'pending') RETURNING id`,
+      [Number(id), plan],
+    );
+    const requestId: number = reqResult.rows[0].id;
+
+    // Email admin
+    const { sendUpgradeRequestEmail } = await import('./emailService');
+    const adminEmail = process.env.ADMIN_EMAIL ?? process.env.EMAIL_USER ?? '';
+    if (adminEmail) {
+      void sendUpgradeRequestEmail({
+        adminEmail,
+        instituteName: inst.name,
+        instituteEmail: inst.email,
+        institutePhone: inst.phone,
+        currentPlan: inst.plan,
+        requestedPlan: plan,
+        requestId,
+      });
+    }
+
+    res.status(201).json({ success: true, requestId, status: 'pending' });
+  } catch (err) {
+    console.error('Request upgrade error:', err);
+    res.status(500).json({ error: 'Failed to submit upgrade request.' });
+  }
+});
+
+// GET /api/institutes/:id/upgrade-request
+// Returns the current pending upgrade request for an institute, if any.
+router.get('/:id/upgrade-request', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS upgrade_requests (
+        id             SERIAL PRIMARY KEY,
+        institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+        requested_plan TEXT NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at    TIMESTAMPTZ
+      )
+    `);
+
+    const result = await pool.query(
+      `SELECT id, requested_plan, status, created_at
+       FROM upgrade_requests
+       WHERE institute_id = $1 AND status = 'pending'
+       ORDER BY created_at DESC LIMIT 1`,
+      [Number(id)],
+    );
+
+    res.json(result.rows[0] ?? null);
+  } catch (err) {
+    console.error('Get upgrade request error:', err);
+    res.status(500).json({ error: 'Failed to fetch upgrade request.' });
+  }
+});
+
 // DELETE /api/institutes/:id/disconnect-whatsapp
 router.delete('/:id/disconnect-whatsapp', async (req: Request, res: Response) => {
   const { id } = req.params;
