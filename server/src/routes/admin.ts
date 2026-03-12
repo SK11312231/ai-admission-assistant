@@ -263,14 +263,11 @@ router.delete('/institutes/:id', async (req: Request, res: Response) => {
     const client = await pool.connect();
     try {
       await client.query('BEGIN');
-      await client.query(`DELETE FROM blocklist WHERE institute_id = $1`, [instId]);
+      // Delete in correct dependency order using exact table names
+      await client.query(`DELETE FROM blocked_numbers WHERE institute_id = $1`, [instId]);
       await client.query(`DELETE FROM upgrade_requests WHERE institute_id = $1`, [instId]);
-      // These tables may not exist on all deployments — ignore errors
-      await client.query(`DELETE FROM institute_enrichment WHERE institute_id = $1`, [instId]).catch(() => {});
-      await client.query(`
-        DELETE FROM messages WHERE lead_id IN (
-          SELECT id FROM leads WHERE institute_id = $1
-        )`, [instId]).catch(() => {});
+      await client.query(`DELETE FROM institute_details WHERE institute_id = $1`, [instId]);
+      await client.query(`DELETE FROM messages WHERE lead_id IN (SELECT id FROM leads WHERE institute_id = $1)`, [instId]);
       await client.query(`DELETE FROM leads WHERE institute_id = $1`, [instId]);
       await client.query(`DELETE FROM institutes WHERE id = $1`, [instId]);
       await client.query('COMMIT');
@@ -375,7 +372,7 @@ router.get('/blocklist', async (_req: Request, res: Response) => {
     const result = await pool.query(`
       SELECT b.id, b.phone, b.reason, b.created_at,
              i.name AS institute_name, i.id AS institute_id
-      FROM blocklist b
+      FROM blocked_numbers b
       JOIN institutes i ON i.id = b.institute_id
       WHERE i.is_active = TRUE
       ORDER BY b.created_at DESC
@@ -392,7 +389,7 @@ router.get('/blocklist', async (_req: Request, res: Response) => {
 router.delete('/blocklist/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    await pool.query(`DELETE FROM blocklist WHERE id = $1`, [Number(id)]);
+    await pool.query(`DELETE FROM blocked_numbers WHERE id = $1`, [Number(id)]);
     res.json({ success: true });
   } catch (err) {
     console.error('Admin delete blocklist error:', err);
