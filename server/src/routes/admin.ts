@@ -24,7 +24,7 @@ function verifyPassword(password: string, stored: string): boolean {
   return computed === hash;
 }
 
-// ── Ensure admins table exists ───────────────────────────────────────────────
+// ── Ensure admins table + is_active column migration ────────────────────────
 
 async function ensureAdminTable(): Promise<void> {
   await pool.query(`
@@ -35,6 +35,11 @@ async function ensureAdminTable(): Promise<void> {
       password_hash TEXT NOT NULL,
       created_at    TIMESTAMPTZ DEFAULT NOW()
     )
+  `);
+  // Safe migration: add is_active to institutes if it doesn't exist
+  await pool.query(`
+    ALTER TABLE institutes
+    ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE
   `);
 }
 
@@ -82,7 +87,6 @@ router.post('/login', async (req: Request, res: Response) => {
 });
 
 // ── POST /api/admin/create ───────────────────────────────────────────────────
-// Creates first admin from ADMIN_BOOTSTRAP_KEY env var (one-time setup)
 
 router.post('/create', async (req: Request, res: Response) => {
   const { name, email, password, bootstrapKey } = req.body as {
@@ -119,22 +123,19 @@ router.use(verifyAdmin);
 
 router.get('/overview', async (_req: Request, res: Response) => {
   try {
+    await ensureAdminTable();
     const [institutes, leads, requests, planBreak, recentInstitutes] = await Promise.all([
-      pool.query(`SELECT COUNT(*) FROM institutes`),
-      pool.query(`SELECT COUNT(*) FROM leads`),
+      pool.query(`SELECT COUNT(*) FROM institutes WHERE is_active = TRUE`),
+      pool.query(`SELECT COUNT(*) FROM leads l JOIN institutes i ON i.id = l.institute_id WHERE i.is_active = TRUE`),
       pool.query(`SELECT COUNT(*) FROM upgrade_requests WHERE status = 'pending'`),
-      pool.query(`SELECT plan, COUNT(*) AS count FROM institutes GROUP BY plan`),
+      pool.query(`SELECT plan, COUNT(*) AS count FROM institutes WHERE is_active = TRUE GROUP BY plan`),
       pool.query(`
         SELECT id, name, email, plan, created_at FROM institutes
-        ORDER BY created_at DESC LIMIT 5
+        WHERE is_active = TRUE ORDER BY created_at DESC LIMIT 5
       `),
     ]);
-
     const planMap: Record<string, number> = {};
-    for (const row of planBreak.rows) {
-      planMap[row.plan as string] = Number(row.count);
-    }
-
+    for (const row of planBreak.rows) planMap[row.plan as string] = Number(row.count);
     res.json({
       totalInstitutes: Number(institutes.rows[0].count),
       totalLeads: Number(leads.rows[0].count),
@@ -149,20 +150,28 @@ router.get('/overview', async (_req: Request, res: Response) => {
 });
 
 // ── GET /api/admin/institutes ────────────────────────────────────────────────
+// ?inactive=true  →  returns deactivated institutes only
 
 router.get('/institutes', async (req: Request, res: Response) => {
   const search = (req.query.search as string) ?? '';
+  const inactive = req.query.inactive === 'true';
   try {
+    const conditions: string[] = [`i.is_active = ${inactive ? 'FALSE' : 'TRUE'}`];
+    const params: unknown[] = [];
+    if (search) {
+      params.push(`%${search}%`);
+      conditions.push(`(i.name ILIKE $${params.length} OR i.email ILIKE $${params.length})`);
+    }
     const result = await pool.query(`
       SELECT i.id, i.name, i.email, i.phone, i.whatsapp_number, i.website,
-             i.plan, i.whatsapp_connected, i.created_at,
+             i.plan, i.whatsapp_connected, i.is_active, i.created_at,
              COUNT(l.id) AS lead_count
       FROM institutes i
       LEFT JOIN leads l ON l.institute_id = i.id
-      ${search ? `WHERE i.name ILIKE $1 OR i.email ILIKE $1` : ''}
+      WHERE ${conditions.join(' AND ')}
       GROUP BY i.id
       ORDER BY i.created_at DESC
-    `, search ? [`%${search}%`] : []);
+    `, params);
     res.json(result.rows);
   } catch (err) {
     console.error('Admin institutes error:', err);
@@ -181,7 +190,6 @@ router.patch('/institutes/:id/plan', async (req: Request, res: Response) => {
   }
   try {
     await pool.query(`UPDATE institutes SET plan = $1 WHERE id = $2`, [plan, Number(id)]);
-    // Mark any matching pending upgrade requests as approved
     await pool.query(
       `UPDATE upgrade_requests SET status = 'approved', resolved_at = NOW()
        WHERE institute_id = $1 AND requested_plan = $2 AND status = 'pending'`,
@@ -194,16 +202,88 @@ router.patch('/institutes/:id/plan', async (req: Request, res: Response) => {
   }
 });
 
+// ── PATCH /api/admin/institutes/:id/deactivate ──────────────────────────────
+
+router.patch('/institutes/:id/deactivate', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    await pool.query(`UPDATE institutes SET is_active = FALSE WHERE id = $1`, [Number(id)]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Admin deactivate error:', err);
+    res.status(500).json({ error: 'Failed to deactivate institute.' });
+  }
+});
+
+// ── PATCH /api/admin/institutes/:id/reactivate ──────────────────────────────
+
+router.patch('/institutes/:id/reactivate', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  try {
+    await pool.query(`UPDATE institutes SET is_active = TRUE WHERE id = $1`, [Number(id)]);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Admin reactivate error:', err);
+    res.status(500).json({ error: 'Failed to reactivate institute.' });
+  }
+});
+
 // ── DELETE /api/admin/institutes/:id ────────────────────────────────────────
+// Requires admin password. Only works on inactive institutes.
 
 router.delete('/institutes/:id', async (req: Request, res: Response) => {
   const { id } = req.params;
+  const { adminPassword } = req.body as { adminPassword?: string };
+  const instId = Number(id);
+
+  if (!adminPassword) {
+    res.status(400).json({ error: 'Admin password is required.' });
+    return;
+  }
   try {
-    await pool.query(`DELETE FROM institutes WHERE id = $1`, [Number(id)]);
-    res.json({ success: true });
+    // Verify admin password
+    const adminPayload = (req as Request & { admin: AdminPayload }).admin;
+    const adminResult = await pool.query('SELECT password_hash FROM admins WHERE id = $1', [adminPayload.id]);
+    const admin = adminResult.rows[0] as { password_hash: string } | undefined;
+    if (!admin || !verifyPassword(adminPassword, admin.password_hash)) {
+      res.status(403).json({ error: 'Incorrect admin password.' });
+      return;
+    }
+
+    // Guard: must be inactive first
+    const instCheck = await pool.query(`SELECT is_active FROM institutes WHERE id = $1`, [instId]);
+    const inst = instCheck.rows[0] as { is_active: boolean } | undefined;
+    if (!inst) { res.status(404).json({ error: 'Institute not found.' }); return; }
+    if (inst.is_active) {
+      res.status(400).json({ error: 'Deactivate the institute first before permanently deleting.' });
+      return;
+    }
+
+    // Hard delete inside transaction
+    const client = await pool.connect();
+    try {
+      await client.query('BEGIN');
+      await client.query(`DELETE FROM blocklist WHERE institute_id = $1`, [instId]);
+      await client.query(`DELETE FROM upgrade_requests WHERE institute_id = $1`, [instId]);
+      // These tables may not exist on all deployments — ignore errors
+      await client.query(`DELETE FROM institute_enrichment WHERE institute_id = $1`, [instId]).catch(() => {});
+      await client.query(`
+        DELETE FROM messages WHERE lead_id IN (
+          SELECT id FROM leads WHERE institute_id = $1
+        )`, [instId]).catch(() => {});
+      await client.query(`DELETE FROM leads WHERE institute_id = $1`, [instId]);
+      await client.query(`DELETE FROM institutes WHERE id = $1`, [instId]);
+      await client.query('COMMIT');
+      res.json({ success: true });
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
+    } finally {
+      client.release();
+    }
   } catch (err) {
-    console.error('Admin delete institute error:', err);
-    res.status(500).json({ error: 'Failed to delete institute.' });
+    console.error('Admin hard delete error:', err);
+    res.status(500).json({ error: 'Failed to permanently delete institute.' });
   }
 });
 
@@ -237,24 +317,17 @@ router.patch('/upgrade-requests/:id', async (req: Request, res: Response) => {
   }
   try {
     const reqResult = await pool.query(
-      `SELECT institute_id, requested_plan FROM upgrade_requests WHERE id = $1`,
-      [Number(id)],
-    );
+      `SELECT institute_id, requested_plan FROM upgrade_requests WHERE id = $1`, [Number(id)]);
     const upgradeReq = reqResult.rows[0] as { institute_id: number; requested_plan: string } | undefined;
     if (!upgradeReq) { res.status(404).json({ error: 'Request not found.' }); return; }
-
     await pool.query(
       `UPDATE upgrade_requests SET status = $1, resolved_at = NOW() WHERE id = $2`,
       [action === 'approve' ? 'approved' : 'rejected', Number(id)],
     );
-
     if (action === 'approve') {
-      await pool.query(
-        `UPDATE institutes SET plan = $1 WHERE id = $2`,
-        [upgradeReq.requested_plan, upgradeReq.institute_id],
-      );
+      await pool.query(`UPDATE institutes SET plan = $1 WHERE id = $2`,
+        [upgradeReq.requested_plan, upgradeReq.institute_id]);
     }
-
     res.json({ success: true });
   } catch (err) {
     console.error('Admin upgrade action error:', err);
@@ -268,31 +341,25 @@ router.get('/leads', async (req: Request, res: Response) => {
   const search = (req.query.search as string) ?? '';
   const instituteId = req.query.institute_id ? Number(req.query.institute_id) : null;
   try {
-    const conditions: string[] = [];
+    const conditions: string[] = ['i.is_active = TRUE'];
     const params: unknown[] = [];
     let idx = 1;
-
     if (search) {
       conditions.push(`(l.student_name ILIKE $${idx} OR l.student_phone ILIKE $${idx})`);
-      params.push(`%${search}%`);
-      idx++;
+      params.push(`%${search}%`); idx++;
     }
     if (instituteId) {
       conditions.push(`l.institute_id = $${idx}`);
-      params.push(instituteId);
-      idx++;
+      params.push(instituteId); idx++;
     }
-
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const result = await pool.query(`
       SELECT l.id, l.student_name, l.student_phone, l.message, l.status,
              l.notes, l.follow_up_date, l.created_at,
              i.name AS institute_name, i.id AS institute_id
       FROM leads l
       JOIN institutes i ON i.id = l.institute_id
-      ${where}
-      ORDER BY l.created_at DESC
-      LIMIT 200
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY l.created_at DESC LIMIT 200
     `, params);
     res.json(result.rows);
   } catch (err) {
@@ -310,6 +377,7 @@ router.get('/blocklist', async (_req: Request, res: Response) => {
              i.name AS institute_name, i.id AS institute_id
       FROM blocklist b
       JOIN institutes i ON i.id = b.institute_id
+      WHERE i.is_active = TRUE
       ORDER BY b.created_at DESC
     `);
     res.json(result.rows);
@@ -355,7 +423,6 @@ router.get('/settings', async (_req: Request, res: Response) => {
 });
 
 // ── POST /api/admin/admins ───────────────────────────────────────────────────
-// Logged-in admin can create more admins
 
 router.post('/admins', async (req: Request, res: Response) => {
   const { name, email, password } = req.body as { name?: string; email?: string; password?: string };
