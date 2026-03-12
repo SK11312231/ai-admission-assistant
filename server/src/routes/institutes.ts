@@ -144,7 +144,7 @@ router.post('/login', async (req: Request, res: Response) => {
 
   try {
     const result = await pool.query(
-      'SELECT * FROM institutes WHERE email = $1',
+      'SELECT * FROM institutes WHERE email = $1 AND is_active = TRUE',
       [email.trim().toLowerCase()]
     );
     const institute = result.rows[0] as InstituteRow | undefined;

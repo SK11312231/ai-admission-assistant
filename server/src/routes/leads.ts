@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import OpenAI from 'openai';
 import pool from '../db';
 import { addToBlocklist } from './blocklist';
+import { sendMessageToStudent } from './whatsappManager';
 
 const router = Router();
 
@@ -92,7 +93,6 @@ interface LeadRow {
 router.get('/:instituteId', async (req: Request, res: Response) => {
   const { instituteId } = req.params;
   try {
-    await ensureLeadColumns();
     const result = await pool.query(
       `SELECT id, institute_id, student_name, student_phone, message, status,
               notes, follow_up_date, last_activity_at, created_at
@@ -164,10 +164,14 @@ router.patch('/:id/status', async (req: Request, res: Response) => {
   }
 
   try {
-    await pool.query(
+    const updateResult = await pool.query(
       `UPDATE leads SET status = $1, last_activity_at = NOW() WHERE id = $2`,
       [status, Number(id)],
     );
+    if ((updateResult.rowCount ?? 0) === 0) {
+      res.status(404).json({ error: 'Lead not found.' });
+      return;
+    }
 
     // Auto-add to blocklist when marked as Lost
     if (status === 'lost') {
@@ -296,8 +300,6 @@ router.post('/:id/send-followup', async (req: Request, res: Response) => {
     const followUpMessage = completion.choices[0]?.message?.content?.trim() || 
       `Hi! We noticed your enquiry about ${lead.institute_name as string}. We'd love to help you with your admission process. Are you still interested?`;
 
-    // Import sendMessage from whatsappManager to send via WhatsApp
-    const { sendMessageToStudent } = await import('./whatsappManager');
     const sent = await sendMessageToStudent(
       String(lead.institute_id),
       `${lead.student_phone as string}@c.us`,

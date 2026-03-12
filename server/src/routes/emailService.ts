@@ -81,7 +81,7 @@ export async function sendNewLeadEmail(opts: {
   message: string;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, studentName, studentPhone, message, dashboardUrl = 'https://ai-admission-assistant-production.up.railway.app' } = opts;
+  const { toEmail, instituteName, studentName, studentPhone, message, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
   const name = studentName ?? 'Unknown Student';
 
   const body = `
@@ -114,7 +114,7 @@ export async function sendFollowUpDueEmail(opts: {
   leads: Array<{ student_name: string | null; student_phone: string; notes: string | null; follow_up_date: string }>;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, leads, dashboardUrl = 'https://ai-admission-assistant-production.up.railway.app' } = opts;
+  const { toEmail, instituteName, leads, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
   if (leads.length === 0) return;
 
   const leadRows = leads.map(l => `
@@ -159,7 +159,7 @@ export async function sendNoReplyReminderEmail(opts: {
   leads: Array<{ student_name: string | null; student_phone: string; message: string; last_activity_at: string }>;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, leads, dashboardUrl = 'https://ai-admission-assistant-production.up.railway.app' } = opts;
+  const { toEmail, instituteName, leads, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
   if (leads.length === 0) return;
 
   const leadRows = leads.map(l => `
@@ -209,7 +209,7 @@ export async function sendWeeklySummaryEmail(opts: {
   conversionRate: string;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, totalLeads, newThisWeek, contacted, converted, lost, conversionRate, dashboardUrl = 'https://ai-admission-assistant-production.up.railway.app' } = opts;
+  const { toEmail, instituteName, totalLeads, newThisWeek, contacted, converted, lost, conversionRate, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
 
   function statBox(emoji: string, label: string, value: number | string, bg: string, color: string): string {
     return `
@@ -270,7 +270,7 @@ export async function sendUpgradeRequestEmail(opts: {
     currentPlan,
     requestedPlan,
     requestId,
-    dashboardUrl = 'https://ai-admission-assistant-production.up.railway.app',
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
   } = opts;
 
   const planLabel = requestedPlan.charAt(0).toUpperCase() + requestedPlan.slice(1);

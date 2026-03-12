@@ -30,17 +30,8 @@ interface MessageRow {
 
 /**
  * WhatsApp Cloud API webhook handler.
- *
- * To enable this integration the institute owner must:
- *   1. Set up a Meta Business App with WhatsApp Business API access.
- *   2. Register the business phone number in Meta → WhatsApp → API Setup.
- *   3. Configure a webhook pointing to:
- *        https://<your-railway-domain>/api/webhook/whatsapp
- *      with these subscribed fields: messages
- *   4. Add the following environment variables in Railway:
- *        WHATSAPP_VERIFY_TOKEN   — a custom string you choose; put the same string in Meta webhook config
- *        WHATSAPP_API_TOKEN      — the permanent system user access token from Meta
- *        GROQ_API_KEY            — your Groq API key for AI-powered replies (free at console.groq.com)
+ * NOTE: This file handles the Meta Cloud API path (for institutes using the
+ * Embedded Signup / Cloud API flow). The QR-based path is handled by whatsappManager.ts.
  */
 
 // ── OpenAI helper ──────────────────────────────────────────────────────────
@@ -59,10 +50,6 @@ function getOpenAI(): OpenAI {
   return openai;
 }
 
-/**
- * Build a system prompt personalised for the specific institute.
- * Includes university data from the DB so the AI can recommend options.
- */
 async function buildInstituteSystemPrompt(institute: InstituteRow): Promise<string> {
   const uniResult = await pool.query(
     'SELECT id, name, location, ranking, acceptance_rate, programs, description FROM universities ORDER BY ranking ASC',
@@ -96,18 +83,14 @@ async function buildInstituteSystemPrompt(institute: InstituteRow): Promise<stri
   );
 }
 
-/**
- * Generate an AI reply for the student using conversation history.
- * Falls back to a friendly static message if OpenAI is unavailable.
- */
 async function generateAIReply(
   institute: InstituteRow,
   studentPhone: string,
   studentMessage: string,
 ): Promise<string> {
-  const sessionId = `whatsapp-${studentPhone}-${institute.id}`;
+  // FIX: session ID format must match whatsappManager.ts and leads.ts
+  const sessionId = `wa-${institute.id}-${studentPhone}`;
 
-  // Retrieve the most recent 10 messages for context window, in chronological order
   const historyResult = await pool.query(
     `SELECT role, content FROM (
        SELECT role, content, created_at FROM messages
@@ -120,7 +103,6 @@ async function generateAIReply(
   );
   const history = historyResult.rows as MessageRow[];
 
-  // Persist the incoming student message
   await pool.query(
     'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
     [sessionId, 'user', studentMessage],
@@ -144,7 +126,6 @@ async function generateAIReply(
     completion.choices[0]?.message?.content?.trim() ??
     `Thank you for reaching out to ${institute.name}! We have received your message and will get back to you shortly.`;
 
-  // Persist the AI reply
   await pool.query(
     'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
     [sessionId, 'assistant', reply],
@@ -152,8 +133,6 @@ async function generateAIReply(
 
   return reply;
 }
-
-// ── WhatsApp Cloud API helper ──────────────────────────────────────────────
 
 async function sendWhatsAppMessage(
   phoneNumberId: string,
@@ -192,7 +171,6 @@ async function sendWhatsAppMessage(
 
 // ── Routes ─────────────────────────────────────────────────────────────────
 
-// GET /api/webhook/whatsapp — Meta webhook verification (challenge handshake)
 router.get('/whatsapp', (req: Request, res: Response) => {
   const mode      = req.query['hub.mode']         as string | undefined;
   const token     = req.query['hub.verify_token'] as string | undefined;
@@ -207,7 +185,6 @@ router.get('/whatsapp', (req: Request, res: Response) => {
   res.sendStatus(403);
 });
 
-// POST /api/webhook/whatsapp — receive incoming WhatsApp messages
 router.post('/whatsapp', async (req: Request, res: Response) => {
   // Always respond 200 immediately so Meta doesn't retry
   res.sendStatus(200);
@@ -221,24 +198,15 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     const messages = value?.messages as Array<Record<string, unknown>> | undefined;
     const metadata = value?.metadata as Record<string, unknown> | undefined;
 
-    if (!messages || messages.length === 0) {
-      // Status update or other non-message event — nothing to do
-      return;
-    }
+    if (!messages || messages.length === 0) return;
 
     const incomingMsg = messages[0];
 
-    // Ignore non-actionable event types (status updates, reactions, etc.)
     const msgType = incomingMsg.type as string;
     if (msgType === 'status' || msgType === 'reaction') return;
 
     const studentPhone = incomingMsg.from as string;
-    const studentName  = (
-      (value?.contacts as Array<Record<string, unknown>> | undefined)?.[0]
-        ?.profile as Record<string, unknown> | undefined
-    )?.name as string | undefined;
 
-    // Support text messages; treat other types (image, audio, etc.) as a generic message
     const messageBody: string =
       (incomingMsg.text as Record<string, unknown> | undefined)?.body as string ||
       `[${msgType ?? 'unknown'} message received]`;
@@ -246,7 +214,7 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
     const businessPhoneId = metadata?.phone_number_id as string | undefined;
     const displayPhone    = metadata?.display_phone_number as string | undefined;
 
-    // Match the receiving WhatsApp number to a registered institute
+    // Match incoming number to a registered institute
     let institute: InstituteRow | undefined;
     if (displayPhone) {
       const normalized = displayPhone.replace(/\D/g, '');
@@ -265,15 +233,22 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
       return;
     }
 
-    // 1. Create a lead for this student inquiry
-    await pool.query(
-      `INSERT INTO leads (institute_id, student_name, student_phone, message)
-       VALUES ($1, $2, $3, $4)`,
-      [institute.id, studentName ?? null, studentPhone, messageBody],
+    // 1. Check blocklist — silently ignore blocked numbers
+    const blocked = await pool.query(
+      `SELECT id FROM blocked_numbers WHERE institute_id = $1 AND phone = $2 LIMIT 1`,
+      [institute.id, studentPhone],
     );
-    console.log(`✅ Lead created for institute ${institute.id} from ${studentPhone}`);
+    if (blocked.rows.length > 0) {
+      console.log(`[Webhook] Blocked number ${studentPhone} — ignoring.`);
+      return;
+    }
 
-    // 2. Generate an AI reply and send it back on WhatsApp
+    // 2. Create/update lead — deduplicates by phone per institute
+    const { createLeadFromWhatsApp } = await import('./leads');
+    await createLeadFromWhatsApp(institute.id, studentPhone, messageBody);
+    console.log(`✅ Lead upserted for institute ${institute.id} from ${studentPhone}`);
+
+    // 3. Generate AI reply and send
     if (businessPhoneId && (institute.whatsapp_access_token ?? process.env.WHATSAPP_API_TOKEN)) {
       try {
         const replyText = await generateAIReply(institute, studentPhone, messageBody);
@@ -286,7 +261,6 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
         console.log(`✅ AI reply sent to ${studentPhone}`);
       } catch (aiErr) {
         console.error('AI reply failed, sending fallback:', aiErr);
-        // Fallback: send a static message so the student isn't left hanging
         const fallback =
           `Hi! Thank you for contacting ${institute.name}. ` +
           `We have received your message and will get back to you shortly.`;
@@ -298,13 +272,10 @@ router.post('/whatsapp', async (req: Request, res: Response) => {
         ).catch(console.error);
       }
     } else {
-      console.warn(
-        'WHATSAPP_API_TOKEN or phone_number_id missing — lead saved, but no reply sent.',
-      );
+      console.warn('WHATSAPP_API_TOKEN or phone_number_id missing — lead saved, but no reply sent.');
     }
   } catch (err) {
     console.error('Webhook processing error:', err);
-    // res.sendStatus(200) was already sent above
   }
 });
 
