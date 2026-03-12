@@ -2,7 +2,7 @@ import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { isNumberBlocked } from './blocklist';
-import { getInstituteDetails } from './instituteEnrichment';
+import { getInstituteDetails, scrapeAndEnrich as scrapeAndEnrichFn } from './instituteEnrichment';
 import { sendNewLeadEmail } from './emailService';
 
 // ── Types ────────────────────────────────────────────────────────────────────
@@ -85,50 +85,53 @@ async function saveLead(
         `UPDATE leads SET last_activity_at = NOW(), message = $1 WHERE id = $2`,
         [message, existing.rows[0].id],
       );
-    } else {
-      // Try name extraction — small call, non-blocking
-      let studentName: string | null = null;
-      try {
-        const client = getOpenAI();
-        const completion = await client.chat.completions.create({
-          model: 'llama-3.3-70b-versatile',
-          messages: [
-            { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
-            { role: 'user', content: message },
-          ],
-          temperature: 0,
-          max_tokens: 20,
-        });
-        const raw = completion.choices[0]?.message?.content?.trim() ?? 'NULL';
-        studentName = raw === 'NULL' || raw === '' ? null : raw;
-      } catch { /* non-fatal */ }
-
-      await pool.query(
-        `INSERT INTO leads (institute_id, student_name, student_phone, message, status, last_activity_at)
-         VALUES ($1, $2, $3, $4, 'new', NOW())`,
-        [instituteId, studentName, studentPhone, message],
-      );
-      console.log(`[WA] New lead: ${studentPhone}, name: ${studentName ?? 'unknown'}`);
-
-      // Send new lead email notification (fire-and-forget)
-      void (async () => {
-        try {
-          const instResult = await pool.query('SELECT name, email FROM institutes WHERE id = $1', [instituteId]);
-          const inst = instResult.rows[0];
-          if (inst?.email) {
-            await sendNewLeadEmail({
-              toEmail: inst.email as string,
-              instituteName: inst.name as string,
-              studentName,
-              studentPhone,
-              message,
-            });
-          }
-        } catch (err) {
-          console.error('[WA] New lead email failed (non-fatal):', err);
-        }
-      })();
+      return; // existing lead updated — no Groq call needed
     }
+
+    // New lead — extract name via Groq
+    // NOTE: This call is intentionally deferred to run AFTER getAIReply completes,
+    // so both Groq calls never race each other and hit rate limits.
+    let studentName: string | null = null;
+    try {
+      const client = getOpenAI();
+      const completion = await client.chat.completions.create({
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
+          { role: 'user', content: message },
+        ],
+        temperature: 0,
+        max_tokens: 20,
+      });
+      const raw = completion.choices[0]?.message?.content?.trim() ?? 'NULL';
+      studentName = raw === 'NULL' || raw === '' ? null : raw;
+    } catch { /* non-fatal */ }
+
+    await pool.query(
+      `INSERT INTO leads (institute_id, student_name, student_phone, message, status, last_activity_at)
+       VALUES ($1, $2, $3, $4, 'new', NOW())`,
+      [instituteId, studentName, studentPhone, message],
+    );
+    console.log(`[WA] New lead: ${studentPhone}, name: ${studentName ?? 'unknown'}`);
+
+    // Send new lead email notification (fire-and-forget)
+    void (async () => {
+      try {
+        const instResult = await pool.query('SELECT name, email FROM institutes WHERE id = $1', [instituteId]);
+        const inst = instResult.rows[0];
+        if (inst?.email) {
+          await sendNewLeadEmail({
+            toEmail: inst.email as string,
+            instituteName: inst.name as string,
+            studentName,
+            studentPhone,
+            message,
+          });
+        }
+      } catch (err) {
+        console.error('[WA] New lead email failed (non-fatal):', err);
+      }
+    })();
   } catch (err) {
     console.error(`[WA] saveLead failed (non-fatal):`, err);
   }
@@ -151,8 +154,7 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
     // If no institute data exists, trigger enrichment in background so next message is better
     if (!instituteData) {
       console.log(`[WA] No institute details found for ${instituteId} — triggering enrichment`);
-      const { scrapeAndEnrich } = await import('./instituteEnrichment');
-      void scrapeAndEnrich(instituteId, instituteName, website);
+      void scrapeAndEnrichFn(instituteId, instituteName, website);
     }
 
     const contextSection = instituteData
@@ -213,7 +215,7 @@ async function getAIReply(
       messages: [
         { role: 'system', content: systemPrompt },
         ...history.map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user', content: messageText.trim() }, // add current message explicitly
+        { role: 'user', content: messageText.trim() },
       ],
       temperature: 0.7,
       max_tokens: 1024,
@@ -236,7 +238,6 @@ async function getAIReply(
 }
 
 // ── Puppeteer client factory ─────────────────────────────────────────────────
-// Back to LocalAuth — simple, reliable, proven working
 
 function makeClient(instituteId: string): Client {
   return new Client({
@@ -299,11 +300,11 @@ export async function initSession(instituteId: string): Promise<void> {
   client.on('message', async (msg: Message) => {
     // Filter out groups, broadcasts, newsletters, linked devices, and system messages
     if (msg.fromMe) return;
-    if (msg.from.endsWith('@g.us')) return;       // group messages
-    if (msg.from.endsWith('@newsletter')) return;  // WhatsApp channel/newsletter
-    if (msg.from.endsWith('@lid')) return;         // linked device messages
-    if (msg.from === 'status@broadcast') return;   // status updates
-    if (!msg.body || msg.body.trim() === '') return; // empty messages
+    if (msg.from.endsWith('@g.us')) return;
+    if (msg.from.endsWith('@newsletter')) return;
+    if (msg.from.endsWith('@lid')) return;
+    if (msg.from === 'status@broadcast') return;
+    if (!msg.body || msg.body.trim() === '') return;
 
     // Check blocklist — silently ignore blocked numbers
     const phoneClean = msg.from.replace('@c.us', '').replace(/[\s\-\+]/g, '');
@@ -320,18 +321,32 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone}`);
     console.log(`[WA] Text: ${messageText}`);
 
-    // Fire-and-forget — never blocks reply
-    void saveLead(Number(instituteId), studentPhone, messageText);
-
+    // ── STEP 1: Generate and send AI reply ──────────────────────────────────
+    // IMPORTANT: getAIReply runs FIRST before saveLead.
+    // saveLead (for new leads) calls Groq for name extraction. If both ran
+    // concurrently they'd race each other and hit Groq rate limits, causing
+    // the AI reply to fail silently and the student to get no response.
     try {
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
-      console.log(`[WA] Reply: ${reply ? reply.slice(0, 80) : 'NULL'}`);
-      if (!reply) return;
-      await client.sendMessage(msg.from, reply, { sendSeen: false });
-      console.log(`[WA] ===== REPLY SENT =====`);
+      console.log(`[WA] Reply: ${reply ? reply.slice(0, 80) : 'NULL — sending fallback'}`);
+
+      if (reply) {
+        await client.sendMessage(msg.from, reply);
+        console.log(`[WA] ===== REPLY SENT =====`);
+      } else {
+        // Groq failed — always send a fallback so the student isn't left hanging
+        const instResult = await pool.query('SELECT name FROM institutes WHERE id = $1', [Number(instituteId)]);
+        const instName: string = instResult.rows[0]?.name ?? 'us';
+        const fallback = `Thank you for contacting ${instName}! We have received your message and will get back to you shortly.`;
+        await client.sendMessage(msg.from, fallback);
+        console.log(`[WA] ===== FALLBACK REPLY SENT =====`);
+      }
     } catch (err) {
       console.error(`[WA] Failed to send reply:`, err);
     }
+
+    // ── STEP 2: Save/update lead — runs AFTER reply so Groq calls don't race ──
+    void saveLead(Number(instituteId), studentPhone, messageText);
   });
 
   await client.initialize();
@@ -367,7 +382,7 @@ export async function sendMessageToStudent(
     return false;
   }
   try {
-    await state.client.sendMessage(toNumber, message, { sendSeen: false });
+    await state.client.sendMessage(toNumber, message);
     console.log(`[WA] Follow-up sent to ${toNumber} for institute ${instituteId}`);
     return true;
   } catch (err) {
