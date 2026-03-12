@@ -267,7 +267,7 @@ router.delete('/institutes/:id', async (req: Request, res: Response) => {
       await client.query(`DELETE FROM blocked_numbers WHERE institute_id = $1`, [instId]);
       await client.query(`DELETE FROM upgrade_requests WHERE institute_id = $1`, [instId]);
       await client.query(`DELETE FROM institute_details WHERE institute_id = $1`, [instId]);
-      await client.query(`DELETE FROM messages WHERE lead_id IN (SELECT id FROM leads WHERE institute_id = $1)`, [instId]);
+      await client.query(`DELETE FROM messages WHERE session_id LIKE $1`, [`wa-${instId}-%`]);
       await client.query(`DELETE FROM leads WHERE institute_id = $1`, [instId]);
       await client.query(`DELETE FROM institutes WHERE id = $1`, [instId]);
       await client.query('COMMIT');
