@@ -297,7 +297,7 @@ export async function initSession(instituteId: string): Promise<void> {
     state.status = 'disconnected';
   });
 
-  client.on('message', async (msg: Message) => {
+  client.on('message_create', async (msg: Message) => {
     // Filter out groups, broadcasts, newsletters, linked devices, and system messages
     if (msg.fromMe) return;
     if (msg.from.endsWith('@g.us')) return;
