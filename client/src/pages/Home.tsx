@@ -224,14 +224,16 @@ export default function Home() {
 
                 {/* CTA */}
                 <div className="px-6 pb-6 bg-white">
-                  <Link to="/register"
-                    className={`block text-center py-2.5 rounded-xl text-sm font-semibold transition-colors ${
-                      plan.popular
-                        ? 'bg-indigo-600 text-white hover:bg-indigo-700'
-                        : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
-                    }`}>
-                    {plan.name === 'Free' ? 'Start Free Trial →' : 'Get Started →'}
-                  </Link>
+                  {plan.name === 'Free' ? (
+                    <Link to="/register"
+                      className="block text-center py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+                      Start Free Trial →
+                    </Link>
+                  ) : (
+                    <div className="block text-center py-2.5 rounded-xl text-sm font-semibold bg-gray-100 text-gray-400 cursor-not-allowed select-none">
+                      🚀 Launching Soon
+                    </div>
+                  )}
                   {plan.originalPrice && (
                     <p className="text-center text-xs text-gray-400 mt-2">
                       Save {plan.name === 'Advanced' ? '₹1,500' : '₹1,100'}/month vs original price
