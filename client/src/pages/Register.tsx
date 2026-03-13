@@ -120,9 +120,9 @@ export default function Register() {
               <label htmlFor="plan" className="block text-sm font-medium text-gray-700 mb-1">Plan</label>
               <select id="plan" name="plan" value={form.plan} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
-                <option value="free">Free — ₹0/month</option>
-                <option value="advanced">Advanced — ₹999/month</option>
-                <option value="pro">Pro — ₹2,499/month</option>
+                <option value="free">Free — ₹0 (30-day trial)</option>
+                <option value="advanced">Advanced — ₹1,499/month</option>
+                <option value="pro">Pro — ₹3,499/month</option>
               </select>
             </div>
 
