@@ -121,9 +121,10 @@ export default function Register() {
               <select id="plan" name="plan" value={form.plan} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
                 <option value="free">Free — ₹0 (30-day trial)</option>
-                <option value="advanced">Advanced — ₹1,499/month</option>
-                <option value="pro">Pro — ₹3,499/month</option>
+                <option value="advanced" disabled>Advanced — ₹1,499/month (Launching Soon)</option>
+                <option value="pro" disabled>Pro — ₹3,499/month (Launching Soon)</option>
               </select>
+              <p className="text-xs text-gray-400 mt-1">Advanced &amp; Pro plans are launching soon. Start with the free trial.</p>
             </div>
 
             <div>
