@@ -20,6 +20,15 @@ interface MessageRow {
   content: string;
 }
 
+// Conversation states detected by the classifier
+type ConversationState =
+  | 'GREETING'    // First message or re-introduction
+  | 'EXPLORING'   // Asking about courses, fees, eligibility
+  | 'BOOKING'     // Wants to book a demo or speak with someone
+  | 'CLOSING'     // Saying thanks, bye, ok, got it — wrapping up
+  | 'LOOP'        // Conversation going in circles, same info repeated
+  | 'OBJECTION';  // Has a concern — too expensive, not sure, needs time
+
 // ── In-memory session store ──────────────────────────────────────────────────
 
 const sessions = new Map<string, SessionState>();
@@ -40,7 +49,6 @@ function getOpenAI(): OpenAI {
 
 // ── Save lead (self-contained) ───────────────────────────────────────────────
 
-// Spam patterns to block from being saved as leads
 const SPAM_PATTERNS = [
   /@lid$/,
   /@newsletter$/,
@@ -54,7 +62,6 @@ const SPAM_PATTERNS = [
 function isSpam(phone: string, message: string): boolean {
   if (SPAM_PATTERNS.some(p => p.test(phone))) return true;
   if (SPAM_PATTERNS.some(p => p.test(message))) return true;
-  // Block if message is just a URL with no other content
   const urlOnly = /^https?:\/\/\S+$/.test(message.trim());
   if (urlOnly) return true;
   return false;
@@ -66,7 +73,6 @@ async function saveLead(
   message: string,
 ): Promise<void> {
   try {
-    // Block spam before touching the DB
     if (isSpam(studentPhone, message)) {
       console.log(`[WA] Spam detected, skipping lead save: ${studentPhone}`);
       return;
@@ -85,12 +91,11 @@ async function saveLead(
         `UPDATE leads SET last_activity_at = NOW(), message = $1 WHERE id = $2`,
         [message, existing.rows[0].id],
       );
-      return; // existing lead updated — no Groq call needed
+      return; // existing lead — no Groq call needed
     }
 
     // New lead — extract name via Groq
-    // NOTE: This call is intentionally deferred to run AFTER getAIReply completes,
-    // so both Groq calls never race each other and hit rate limits.
+    // Runs AFTER getAIReply completes to avoid concurrent Groq calls hitting rate limits
     let studentName: string | null = null;
     try {
       const client = getOpenAI();
@@ -137,9 +142,68 @@ async function saveLead(
   }
 }
 
-// ── Build system prompt ──────────────────────────────────────────────────────
+// ── Stage 1: Classify conversation state ─────────────────────────────────────
+//
+// Runs a fast, cheap Groq call (max_tokens: 5) BEFORE generating the main reply.
+// Returns one of 6 states that tells the AI exactly what kind of response is needed.
+// This removes the guesswork — the AI no longer has to infer conversation stage
+// from rules; it's told directly via the CURRENT INSTRUCTION line in the prompt.
 
-async function buildSystemPrompt(instituteId: number): Promise<string> {
+async function classifyConversationState(
+  history: MessageRow[],
+  currentMessage: string,
+): Promise<ConversationState> {
+  try {
+    // Last 6 messages is enough context to determine state — saves tokens
+    const recent = history.slice(-6);
+    const transcript = recent
+      .map(m => `${m.role === 'user' ? 'Student' : 'AI'}: ${m.content.slice(0, 200)}`)
+      .join('\n');
+
+    const client = getOpenAI();
+    const result = await client.chat.completions.create({
+      model: 'llama-3.3-70b-versatile',
+      messages: [{
+        role: 'user',
+        content:
+          `You are classifying the state of a WhatsApp admission enquiry conversation.\n\n` +
+          `Recent conversation:\n${transcript || '(no history yet)'}\n\n` +
+          `Latest student message: "${currentMessage}"\n\n` +
+          `Reply with ONLY one word:\n` +
+          `GREETING   — first contact, no prior context\n` +
+          `EXPLORING  — asking about courses, fees, eligibility, duration, batches\n` +
+          `BOOKING    — explicitly wants to book a demo, visit, or speak with someone\n` +
+          `CLOSING    — saying thanks, bye, ok, got it, noted, sure — wrapping up\n` +
+          `LOOP       — AI has already answered this exact question or given this info before\n` +
+          `OBJECTION  — has a concern: too expensive, needs time, not sure, will think about it\n\n` +
+          `State:`,
+      }],
+      temperature: 0,
+      max_tokens: 5,
+    });
+
+    const raw = result.choices[0]?.message?.content?.trim().toUpperCase() ?? '';
+    const valid: ConversationState[] = ['GREETING', 'EXPLORING', 'BOOKING', 'CLOSING', 'LOOP', 'OBJECTION'];
+    const state = valid.find(s => raw.startsWith(s)) ?? 'EXPLORING';
+    console.log(`[WA] Conversation state classified: ${state}`);
+    return state;
+  } catch (err) {
+    console.error('[WA] classifyConversationState failed (defaulting to EXPLORING):', err);
+    return 'EXPLORING'; // safe fallback
+  }
+}
+
+// ── Stage 2: Build system prompt with state + few-shot examples ───────────────
+//
+// The prompt has three layers:
+//   1. CURRENT INSTRUCTION  — state-specific directive injected at the very top
+//   2. Institute context    — courses, fees, eligibility from the enriched profile
+//   3. Few-shot examples    — real conversation patterns teach behaviour better than rules
+
+async function buildSystemPrompt(
+  instituteId: number,
+  state: ConversationState,
+): Promise<string> {
   try {
     const instResult = await pool.query(
       'SELECT name, website FROM institutes WHERE id = $1',
@@ -151,7 +215,6 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
     let instituteData: string | null = null;
     try { instituteData = await getInstituteDetails(instituteId); } catch { /* non-fatal */ }
 
-    // If no institute data exists, trigger enrichment in background so next message is better
     if (!instituteData) {
       console.log(`[WA] No institute details found for ${instituteId} — triggering enrichment`);
       void scrapeAndEnrichFn(instituteId, instituteName, website);
@@ -159,36 +222,132 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
 
     const contextSection = instituteData
       ? `You have the following detailed information about ${instituteName}:\n\n${instituteData}`
-      : `You are representing ${instituteName}. You do not yet have specific details about this institute's courses or fees. ` +
-        `Be honest that you are still gathering information, and ask the student what specific aspect they want to know about ` +
-        `(e.g. courses, fees, eligibility, placements) so you can help them better.`;
-      
-    const websiteUrl = website ? website.trim() : null;
-    const bookingLine = websiteUrl
-      ? `If a student asks to book a demo, schedule a visit, or speak with a counselor, tell them: "Please visit ${websiteUrl} to book your free demo session, or share your contact number and our team will call you back shortly."`
-      : `If a student asks to book a demo, schedule a visit, or speak with a counselor, tell them: "Please share your contact number and our team will call you back shortly to schedule your free demo session."`;
+      : `You are representing ${instituteName}. Detailed profile data is still being gathered. ` +
+        `Be honest about this and ask the student what they want to know (courses, fees, eligibility).`;
+
+    // Concrete booking action — uses website URL if available, falls back to callback
+    const bookingAction = website
+      ? `Tell them: "Please visit ${website} to book your free demo session, or share your phone number and our team will call you back to confirm."`
+      : `Tell them: "Please share your phone number and our team will call you back shortly to schedule your free demo session."`;
+
+    // ── State-specific instructions ───────────────────────────────────────────
+    // Each state gets a precise directive. This is injected as the FIRST thing
+    // the AI reads — it overrides any ambiguity about how to respond.
+    const stateInstructions: Record<ConversationState, string> = {
+      GREETING:
+        `STATE: GREETING — New conversation starting. Give a warm, brief welcome message. ` +
+        `Ask exactly ONE open question to understand what the student is looking for. ` +
+        `Do NOT list courses yet. Do NOT ask multiple questions.`,
+
+      EXPLORING:
+        `STATE: EXPLORING — Student is looking for information. Answer their specific question ` +
+        `concisely using only the institute information below. Then ask ONE focused follow-up ` +
+        `question that moves toward a concrete outcome (demo booking or counselor call). ` +
+        `Do NOT repeat anything already said in this conversation.`,
+
+      BOOKING:
+        `STATE: BOOKING — Student wants to book a demo or speak with someone. ` +
+        `${bookingAction} ` +
+        `Do NOT ask any more questions. Do NOT describe courses again. ` +
+        `Just give them the single next action and stop.`,
+
+      CLOSING:
+        `STATE: CLOSING — The student is ending this conversation. ` +
+        `Write 1-2 warm closing sentences ONLY. ` +
+        `Do NOT ask another question. Do NOT pitch more courses. Do NOT say "What brings you here". ` +
+        `Do NOT restart the conversation. Just say goodbye warmly and stop.`,
+
+      LOOP:
+        `STATE: LOOP — This conversation is repeating itself. You have already given this information. ` +
+        `Do NOT repeat it again under any circumstances. ` +
+        `Give ONE concrete next step only: a booking link, a callback request, or a closure. ` +
+        `Then stop. Break the loop now.`,
+
+      OBJECTION:
+        `STATE: OBJECTION — Student has a concern or hesitation. ` +
+        `First acknowledge their concern warmly in one sentence. ` +
+        `Then address it directly and briefly. ` +
+        `If they need time, offer to follow up later and ask for their preferred contact number.`,
+    };
+
+    // ── Few-shot examples ─────────────────────────────────────────────────────
+    // These teach the AI the exact response pattern for each state.
+    // Examples are far more reliable than rules for LLM instruction-following.
+    const fewShotExamples = `
+CONVERSATION EXAMPLES — match this response style exactly:
+
+[CLOSING — student says thanks or wraps up]
+Student: ok thanks
+AI: You're welcome! Feel free to reach out anytime if you have more questions. We look forward to hearing from you. 😊
+
+Student: thanks, will check
+AI: Of course! Take your time. We're here whenever you're ready. Have a great day! 😊
+
+[BOOKING — student explicitly asks to book]
+Student: Yes I would like to book a free demo
+AI: ${website
+      ? `Great! Please visit ${website} to book your free demo session. You can also share your phone number here and our team will call you back to confirm the timing.`
+      : `Great! Please share your phone number and our team will call you back shortly to schedule your free demo session.`}
+
+Student: please book a free demo for data science
+AI: ${website
+      ? `Happy to help! Please visit ${website} to book your Data Science demo session. Alternatively, share your phone number and our counselor will call you back to set it up.`
+      : `Happy to help! Please share your phone number and our counselor will call you back to schedule your Data Science demo session.`}
+
+[LOOP — student keeps saying Yes but nothing new is being asked]
+Student: Yes
+AI: ${website
+      ? `Got it! The easiest next step is to visit ${website} and book a free demo session. Our counselor will walk you through everything. Alternatively, share your number and we'll call you.`
+      : `Got it! The easiest next step is to share your phone number so our counselor can call you and walk you through everything.`}
+
+[GREETING — first message]
+Student: Hi
+AI: Hi! Welcome to ${instituteName}. Are you looking to learn a new skill or upskill in a specific area?
+
+Student: Hello
+AI: Hello! Thanks for reaching out to ${instituteName}. What course or subject are you interested in?
+
+[EXPLORING — answer and move forward]
+Student: What is the fee for data science?
+AI: Our Data Science course fee is [fee from institute data]. The course duration is [duration]. Would you like to book a free demo session to speak with a counselor directly?
+
+[OBJECTION — student is hesitant]
+Student: I need some time to think
+AI: Of course, take all the time you need! If it helps, you can attend a free demo session first with no commitment. Would you like me to arrange one whenever you're ready?
+
+Student: it seems expensive
+AI: That's completely understandable. We do offer flexible payment options and scholarship opportunities. Would you like to speak with a counselor who can walk you through the options in detail?
+`;
 
     return (
-      `You are an AI admission assistant for ${instituteName}. ` +
-      `Your job is to help prospective students with admission enquiries, course information, fees, eligibility, and placements.\n\n` +
+      `You are an AI admission assistant for ${instituteName}.\n\n` +
+      `CURRENT INSTRUCTION: ${stateInstructions[state]}\n\n` +
+      `---\n\n` +
       `${contextSection}\n\n` +
-      `CONVERSATION RULES — follow these strictly:\n` +
-      `1. READ THE FULL CONVERSATION HISTORY before replying. Never repeat information you have already provided in this conversation. If the student has already been told about a course, do not describe it again — move the conversation forward.\n\n` +
-      `2. PROGRESS FORWARD. Each reply must advance the conversation toward a clear outcome (demo booked, counselor connected, question answered). Do not ask the same question twice. If the student already answered a question, acknowledge it and move to the next step.\n\n` +
-      `3. HANDLE BOOKING REQUESTS IMMEDIATELY. ${bookingLine} Do not ask more clarifying questions when a student has already expressed intent to book — just give them the next concrete action.\n\n` +
-      `4. ONE QUESTION PER MESSAGE. If you need more information, ask only one focused question. Never ask two or more questions in the same message.\n\n` +
-      `5. KEEP IT SHORT. Maximum 3 short paragraphs per reply. WhatsApp messages must be easy to read on a phone screen. Do not write walls of text.\n\n` +
-      `6. PLAIN TEXT ONLY. No markdown, no asterisks, no bullet dashes, no bold formatting.\n\n` +
-      `7. FACTS ONLY. Answer only from the institute information provided above. If you do not know something, say "I'll check that and get back to you" — never invent fees, dates, or course details.\n\n` +
-      `8. DO NOT LOOP. If the conversation is going in circles (student keeps saying Yes but nothing progresses), give them a single clear closure: the website link, a callback request, or a specific next step. End the loop.`
+      `---\n\n` +
+      `${fewShotExamples}\n` +
+      `---\n\n` +
+      `HARD RULES (always apply regardless of state):\n` +
+      `- Plain text only. No markdown, no asterisks, no dashes, no bold.\n` +
+      `- Maximum 3 short paragraphs. WhatsApp must be readable on a phone screen.\n` +
+      `- Never repeat information already given in this conversation.\n` +
+      `- Never ask more than one question per message.\n` +
+      `- Never invent fees, dates, or course details not present in the institute data above.`
     );
   } catch (err) {
     console.error(`[WA] buildSystemPrompt failed:`, err);
-    return `You are a helpful AI admission assistant. Answer student questions about admissions warmly and concisely in plain text.`;
+    return `You are a helpful AI admission assistant for an educational institute. Reply warmly and concisely in plain text. Never repeat yourself.`;
   }
 }
 
-// ── Generate AI reply ────────────────────────────────────────────────────────
+// ── Generate AI reply (two-stage pipeline) ───────────────────────────────────
+//
+// STAGE 1 — classifyConversationState()
+//   Fast Groq call, ~5 tokens output, returns one of 6 state labels.
+//
+// STAGE 2 — buildSystemPrompt() + main Groq call
+//   System prompt has state-specific instruction at the top + few-shot examples.
+//   max_tokens and temperature are tuned per state for tighter responses.
 
 async function getAIReply(
   instituteId: number,
@@ -199,7 +358,7 @@ async function getAIReply(
   try {
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
-    // Fetch history BEFORE inserting current message to avoid duplication
+    // Fetch last 20 messages BEFORE inserting current message (avoids duplication in context)
     const historyResult = await pool.query(
       'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 20',
       [sessionId],
@@ -213,33 +372,28 @@ async function getAIReply(
       [sessionId, 'user', messageText.trim()],
     );
 
-    const systemPrompt = await buildSystemPrompt(instituteId);
-    console.log(`[WA] Calling Groq...`);
+    // ── Stage 1: Classify ────────────────────────────────────────────────────
+    const state = await classifyConversationState(history, messageText);
+
+    // ── Stage 2: Build prompt and generate reply ─────────────────────────────
+    const systemPrompt = await buildSystemPrompt(instituteId, state);
+    console.log(`[WA] Calling Groq (state: ${state})...`);
 
     const client = getOpenAI();
     const completion = await client.chat.completions.create({
       model: 'llama-3.3-70b-versatile',
       messages: [
         { role: 'system', content: systemPrompt },
-
-        // conversation history
-        ...history.map((m) => ({
-          role: m.role,
-          content: m.content,
-        })),
-
-        // latest message
-        {
-          role: 'user',
-          content: messageText.trim(),
-        },
+        ...history.map((m) => ({ role: m.role, content: m.content })),
+        { role: 'user', content: messageText.trim() },
       ],
-      temperature: 0.7,
-      max_tokens: 1024,
+      // Tighter settings for states that need short, precise replies
+      temperature: state === 'CLOSING' || state === 'BOOKING' ? 0.3 : 0.7,
+      max_tokens: state === 'CLOSING' ? 80 : state === 'BOOKING' ? 120 : 400,
     });
 
-    // Use || to catch empty string responses
-    const reply = completion.choices[0]?.message?.content?.trim() || 'Sorry, I could not generate a response.';
+    const reply = completion.choices[0]?.message?.content?.trim()
+      || 'Sorry, I could not generate a response.';
     console.log(`[WA] Groq reply (${reply.length} chars): ${reply.slice(0, 80)}`);
 
     await pool.query(
@@ -315,7 +469,6 @@ export async function initSession(instituteId: string): Promise<void> {
   });
 
   client.on('message', async (msg: Message) => {
-    // Filter out groups, broadcasts, newsletters, linked devices, and system messages
     if (msg.fromMe) return;
     if (msg.from.endsWith('@g.us')) return;
     if (msg.from.endsWith('@newsletter')) return;
@@ -323,7 +476,6 @@ export async function initSession(instituteId: string): Promise<void> {
     if (msg.from === 'status@broadcast') return;
     if (!msg.body || msg.body.trim() === '') return;
 
-    // Check blocklist — silently ignore blocked numbers
     const phoneClean = msg.from.replace('@c.us', '').replace(/[\s\-\+]/g, '');
     const blocked = await isNumberBlocked(Number(instituteId), phoneClean);
     if (blocked) {
@@ -338,11 +490,9 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone}`);
     console.log(`[WA] Text: ${messageText}`);
 
-    // ── STEP 1: Generate and send AI reply ──────────────────────────────────
-    // IMPORTANT: getAIReply runs FIRST before saveLead.
-    // saveLead (for new leads) calls Groq for name extraction. If both ran
-    // concurrently they'd race each other and hit Groq rate limits, causing
-    // the AI reply to fail silently and the student to get no response.
+    // ── STEP 1: Generate and send AI reply FIRST ─────────────────────────────
+    // saveLead (for new leads) calls Groq for name extraction. Running both
+    // concurrently would race and hit Groq rate limits, silently killing the reply.
     try {
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
       console.log(`[WA] Reply: ${reply ? reply.slice(0, 80) : 'NULL — sending fallback'}`);
@@ -351,7 +501,7 @@ export async function initSession(instituteId: string): Promise<void> {
         await client.sendMessage(msg.from, reply);
         console.log(`[WA] ===== REPLY SENT =====`);
       } else {
-        // Groq failed — always send a fallback so the student isn't left hanging
+        // Groq failed — always send fallback so student isn't left in silence
         const instResult = await pool.query('SELECT name FROM institutes WHERE id = $1', [Number(instituteId)]);
         const instName: string = instResult.rows[0]?.name ?? 'us';
         const fallback = `Thank you for contacting ${instName}! We have received your message and will get back to you shortly.`;
@@ -362,7 +512,7 @@ export async function initSession(instituteId: string): Promise<void> {
       console.error(`[WA] Failed to send reply:`, err);
     }
 
-    // ── STEP 2: Save/update lead — runs AFTER reply so Groq calls don't race ──
+    // ── STEP 2: Save/update lead AFTER reply ─────────────────────────────────
     void saveLead(Number(instituteId), studentPhone, messageText);
   });
 
@@ -384,9 +534,6 @@ export async function disconnectSession(instituteId: string): Promise<void> {
   sessions.delete(instituteId);
   await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
 }
-
-// ── Send a message to a student from a connected institute session ────────────
-// Used by the follow-up endpoint in leads.ts
 
 export async function sendMessageToStudent(
   instituteId: string,
