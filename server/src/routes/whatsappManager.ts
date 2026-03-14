@@ -167,8 +167,17 @@ async function buildSystemPrompt(instituteId: number): Promise<string> {
       `You are an AI admission assistant for ${instituteName}. ` +
       `Your job is to help prospective students with admission enquiries, course information, fees, eligibility, and placements.\n\n` +
       `${contextSection}\n\n` +
+      `Important conversation rules:\n` +
+      `1. Always continue the conversation naturally based on the previous messages.\n` +
+      `2. Never restart the conversation once it has begun.\n` +
+      `3. Never repeat greetings like "Hello" or "How can I help you?" after the first message.\n` +
+      `4. If the student says "explain more", "tell me more", or "can you explain", continue explaining the LAST topic discussed.\n` +
+      `5. If the student already told you something (for example: they have IT experience), do NOT ask the same question again.\n` +
+      `6. If the student mentions interest in a domain (like Data Science), focus the conversation on that domain.\n` +
       `Guidelines:\n` +
       `- Be warm, encouraging, and professional.\n` +
+      `- Reply like a real admission counselor on WhatsApp.\n` +
+      `- No markdown, no formatting symbols.\n` +
       `- Answer ONLY based on the institute information provided above — do not invent or assume any facts.\n` +
       `- If asked about specific courses, fees, or dates not mentioned above, say you will check and get back to them.\n` +
       `- Keep responses concise (2-3 short paragraphs max).\n` +
@@ -194,7 +203,7 @@ async function getAIReply(
 
     // Fetch history BEFORE inserting current message to avoid duplication
     const historyResult = await pool.query(
-      'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 10',
+      'SELECT role, content FROM messages WHERE session_id = $1 ORDER BY created_at ASC LIMIT 20',
       [sessionId],
     );
     const history = historyResult.rows as MessageRow[];
@@ -214,8 +223,18 @@ async function getAIReply(
       model: 'llama-3.3-70b-versatile',
       messages: [
         { role: 'system', content: systemPrompt },
-        ...history.map((m) => ({ role: m.role, content: m.content })),
-        { role: 'user', content: messageText.trim() },
+
+        // conversation history
+        ...history.map((m) => ({
+          role: m.role,
+          content: m.content,
+        })),
+
+        // latest message
+        {
+          role: 'user',
+          content: messageText.trim(),
+        },
       ],
       temperature: 0.7,
       max_tokens: 1024,
