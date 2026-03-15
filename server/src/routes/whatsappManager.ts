@@ -392,12 +392,6 @@ async function getAIReply(
 function makeClient(instituteId: string): Client {
   return new Client({
     authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
-    // Pin a stable WhatsApp Web version — prevents breakage when WA updates
-    webVersion: '2.3000.1015901620-alpha',
-    webVersionCache: {
-      type: 'remote',
-      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1015901620-alpha.html',
-    },
     puppeteer: {
       args: [
         '--no-sandbox',
@@ -406,9 +400,7 @@ function makeClient(instituteId: string): Client {
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
         '--no-zygote',
-        // NOTE: --single-process intentionally removed.
-        // It causes Chrome to crash silently after QR auth on Railway,
-        // which is why 'ready' never fires. --no-zygote alone is sufficient.
+        // '--single-process' removed — crashes Chrome silently after QR auth on Railway
         '--disable-gpu',
         '--disable-features=site-per-process',
         '--js-flags=--max-old-space-size=512',
@@ -438,7 +430,7 @@ export async function initSession(instituteId: string): Promise<void> {
   });
 
   client.on('authenticated', () => {
-    console.log(`[WA] ✅ Authenticated successfully for institute ${instituteId}`);
+    console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
   });
 
   client.on('ready', async () => {
