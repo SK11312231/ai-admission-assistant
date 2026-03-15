@@ -392,11 +392,26 @@ async function getAIReply(
 function makeClient(instituteId: string): Client {
   return new Client({
     authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
+    // Pin a stable WhatsApp Web version — prevents breakage when WA updates
+    webVersion: '2.3000.1015901620-alpha',
+    webVersionCache: {
+      type: 'remote',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1015901620-alpha.html',
+    },
     puppeteer: {
       args: [
-        '--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage',
-        '--disable-accelerated-2d-canvas', '--no-first-run', '--no-zygote',
-        '--single-process', '--disable-gpu',
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        // NOTE: --single-process intentionally removed.
+        // It causes Chrome to crash silently after QR auth on Railway,
+        // which is why 'ready' never fires. --no-zygote alone is sufficient.
+        '--disable-gpu',
+        '--disable-features=site-per-process',
+        '--js-flags=--max-old-space-size=512',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
@@ -417,6 +432,15 @@ export async function initSession(instituteId: string): Promise<void> {
   sessions.set(instituteId, state);
 
   client.on('qr', (qr) => { state.qr = qr; state.status = 'qr'; console.log(`[WA] QR received for institute ${instituteId}`); });
+
+  client.on('loading_screen', (percent, message) => {
+    console.log(`[WA] Loading institute ${instituteId}: ${percent}% — ${message}`);
+  });
+
+  client.on('authenticated', () => {
+    console.log(`[WA] ✅ Authenticated successfully for institute ${instituteId}`);
+  });
+
   client.on('ready', async () => {
     state.qr = null; state.status = 'connected';
     console.log(`[WA] ✅ Client READY for institute ${instituteId}`);
