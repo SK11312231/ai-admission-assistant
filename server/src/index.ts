@@ -16,6 +16,7 @@ import blocklistRouter from './routes/blocklist';
 import analyticsRouter from './routes/analytics';
 import widgetRouter from './routes/widget';
 import adminRouter from './routes/admin';
+import trainingRouter from './routes/chatTraining';  // ← AI Training feature
 
 const app = express();
 app.set('trust proxy', 1);
@@ -47,7 +48,7 @@ const allowedOrigins = [
 ].filter(Boolean) as string[];
 
 app.use(cors({ origin: allowedOrigins, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: '5mb' })); // increased for WhatsApp chat text uploads
 
 // Rate limiters
 const defaultLimiter = rateLimit({
@@ -65,6 +66,7 @@ app.use('/api/leads', defaultLimiter, leadsRouter);
 app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/blocklist', defaultLimiter, blocklistRouter);
 app.use('/api/analytics', defaultLimiter, analyticsRouter);
+app.use('/api/training', defaultLimiter, trainingRouter);  // ← AI Training feature
 app.use('/api/widget', widgetRouter);
 app.use('/api/admin', defaultLimiter, adminRouter);
 app.use('/api/webhook', webhookRouter);

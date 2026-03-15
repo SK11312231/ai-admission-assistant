@@ -61,6 +61,55 @@ export async function initDB(): Promise<void> {
   `);
   console.log('  ✅ leads table ready');
 
+  // ── AI Training tables (safe to run repeatedly — IF NOT EXISTS) ──────────────
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS chat_examples (
+      id              SERIAL PRIMARY KEY,
+      institute_id    INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      student_message TEXT NOT NULL,
+      owner_reply     TEXT NOT NULL,
+      category        TEXT DEFAULT 'general',
+      is_approved     BOOLEAN NOT NULL DEFAULT TRUE,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_chat_examples_institute
+      ON chat_examples (institute_id, is_approved)
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS institute_personality (
+      institute_id   INTEGER PRIMARY KEY REFERENCES institutes(id) ON DELETE CASCADE,
+      profile        TEXT NOT NULL,
+      language_style TEXT DEFAULT 'english',
+      example_count  INTEGER DEFAULT 0,
+      generated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS reply_feedback (
+      id              SERIAL PRIMARY KEY,
+      institute_id    INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      session_id      TEXT NOT NULL,
+      student_message TEXT NOT NULL,
+      ai_reply        TEXT NOT NULL,
+      feedback        TEXT CHECK (feedback IN ('good', 'bad')),
+      corrected_reply TEXT,
+      created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_reply_feedback_institute
+      ON reply_feedback (institute_id)
+  `);
+
+  console.log('✅ AI Training tables ready.');
+
   // Create universities table — stores university data for AI counselor
   await pool.query(`
     CREATE TABLE IF NOT EXISTS universities (
