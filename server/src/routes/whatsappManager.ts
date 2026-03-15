@@ -405,33 +405,26 @@ async function getAIReply(
 function makeClient(instituteId: string): Client {
   return new Client({
     authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
+    // Force whatsapp-web.js to use its own bundled WA Web version.
+    // Without this, it loads whatever WhatsApp is currently serving.
+    // If that version is incompatible with the installed library, the injection
+    // script fails silently — authenticated fires but loading_screen never does.
+    webVersionCache: {
+      type: 'local',
+    },
     puppeteer: {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
-        '--disable-gpu',
         '--no-first-run',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
         '--disable-extensions',
-        '--disable-default-apps',
-        '--disable-translate',
-        '--safebrowsing-disable-auto-update',
-        '--metrics-recording-only',
-        '--mute-audio',
-        '--window-size=1280,720',
-        '--disable-background-networking',
-        '--disable-background-timer-throttling',
-        '--disable-client-side-phishing-detection',
-        '--disable-hang-monitor',
-        '--disable-popup-blocking',
-        '--disable-prompt-on-repost',
-        '--disable-sync',
-        '--force-color-profile=srgb',
-        '--disable-blink-features=AutomationControlled',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      headless: 'new' as unknown as boolean, // 'new' headless mode — more stable than true on Railway
+      headless: true,
     },
   });
 }
@@ -477,6 +470,13 @@ export async function initSession(instituteId: string): Promise<void> {
     // Guard the watchdog so it only starts ONCE no matter how many times this fires.
     if (watchdogTimer !== null) return;
     console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
+
+    // Listen for page-level errors to diagnose why loading_screen never fires
+    void (client as unknown as { pupPage?: { on?: (e: string, cb: (err: Error) => void) => void } })
+      .pupPage?.on?.('pageerror', (err: Error) => {
+        console.error(`[WA] Page error for institute ${instituteId}:`, err.message?.slice(0, 200));
+      });
+
     watchdogTimer = setTimeout(() => {
       console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s. Destroying session.`);
       void state.client.destroy().catch(() => { /* ignore */ });
