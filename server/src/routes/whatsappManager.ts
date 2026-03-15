@@ -419,9 +419,19 @@ function makeClient(instituteId: string): Client {
         '--safebrowsing-disable-auto-update',
         '--metrics-recording-only',
         '--mute-audio',
+        '--window-size=1280,720',
+        '--disable-background-networking',
+        '--disable-background-timer-throttling',
+        '--disable-client-side-phishing-detection',
+        '--disable-hang-monitor',
+        '--disable-popup-blocking',
+        '--disable-prompt-on-repost',
+        '--disable-sync',
+        '--force-color-profile=srgb',
+        '--disable-blink-features=AutomationControlled',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
-      headless: true,
+      headless: 'new' as unknown as boolean, // 'new' headless mode — more stable than true on Railway
     },
   });
 }
@@ -463,8 +473,10 @@ export async function initSession(instituteId: string): Promise<void> {
   });
 
   client.on('authenticated', () => {
+    // whatsapp-web.js fires 'authenticated' once per linked device on the phone.
+    // Guard the watchdog so it only starts ONCE no matter how many times this fires.
+    if (watchdogTimer !== null) return;
     console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
-    // Start watchdog: destroy if ready doesn't fire within 90 seconds
     watchdogTimer = setTimeout(() => {
       console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s. Destroying session.`);
       void state.client.destroy().catch(() => { /* ignore */ });
