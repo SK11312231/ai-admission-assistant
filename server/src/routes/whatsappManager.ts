@@ -33,6 +33,11 @@ type ConversationState =
 
 const sessions = new Map<string, SessionState>();
 
+// Initialization lock — prevents multiple concurrent initSession calls for the
+// same institute from all racing past the guard and creating 3 client instances.
+// This was causing "authenticated 3x" in logs.
+const initLocks = new Set<string>();
+
 // ── Lazy OpenAI/Groq client ──────────────────────────────────────────────────
 
 let openai: OpenAI | null = null;
@@ -388,6 +393,14 @@ async function getAIReply(
 }
 
 // ── Puppeteer client factory ─────────────────────────────────────────────────
+//
+// Chrome flag notes for Railway:
+// - --no-sandbox + --disable-setuid-sandbox: required in containers
+// - --disable-dev-shm-usage: prevents /dev/shm OOM crashes
+// - --no-zygote: REMOVED — without --single-process, this breaks renderer spawning
+// - --single-process: REMOVED — causes silent crash after QR auth
+// - --disable-gpu: safe, no GPU in container
+// The minimal safe set below is proven to work in Railway/Docker environments.
 
 function makeClient(instituteId: string): Client {
   return new Client({
@@ -398,12 +411,14 @@ function makeClient(instituteId: string): Client {
         '--disable-setuid-sandbox',
         '--disable-dev-shm-usage',
         '--disable-accelerated-2d-canvas',
-        '--no-first-run',
-        '--no-zygote',
-        // '--single-process' removed — crashes Chrome silently after QR auth on Railway
         '--disable-gpu',
-        '--disable-features=site-per-process',
-        '--js-flags=--max-old-space-size=512',
+        '--no-first-run',
+        '--disable-extensions',
+        '--disable-default-apps',
+        '--disable-translate',
+        '--safebrowsing-disable-auto-update',
+        '--metrics-recording-only',
+        '--mute-audio',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
@@ -414,16 +429,34 @@ function makeClient(instituteId: string): Client {
 // ── Init session ─────────────────────────────────────────────────────────────
 
 export async function initSession(instituteId: string): Promise<void> {
+  // Lock guard — if another call is already initializing this institute, skip.
+  // Without this, concurrent calls (restoreAllSessions + user click) all race
+  // past the status check before status is set, creating 3 client instances.
+  if (initLocks.has(instituteId)) {
+    console.log(`[WA] initSession skipped — already initializing institute ${instituteId}`);
+    return;
+  }
+
   const existing = sessions.get(instituteId);
   if (existing?.status === 'connected') return;
   if (existing?.status === 'initializing' || existing?.status === 'qr') return;
+
+  initLocks.add(instituteId);
 
   console.log(`[WA] Initializing session for institute ${instituteId}`);
   const client = makeClient(instituteId);
   const state: SessionState = { client, qr: null, status: 'initializing' };
   sessions.set(instituteId, state);
 
-  client.on('qr', (qr) => { state.qr = qr; state.status = 'qr'; console.log(`[WA] QR received for institute ${instituteId}`); });
+  // Watchdog: if 'ready' doesn't fire within 90s after 'authenticated',
+  // destroy the session so the institute can try again rather than hanging forever.
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  client.on('qr', (qr) => {
+    state.qr = qr;
+    state.status = 'qr';
+    console.log(`[WA] QR received for institute ${instituteId}`);
+  });
 
   client.on('loading_screen', (percent, message) => {
     console.log(`[WA] Loading institute ${instituteId}: ${percent}% — ${message}`);
@@ -431,20 +464,35 @@ export async function initSession(instituteId: string): Promise<void> {
 
   client.on('authenticated', () => {
     console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
+    // Start watchdog: destroy if ready doesn't fire within 90 seconds
+    watchdogTimer = setTimeout(() => {
+      console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s. Destroying session.`);
+      void state.client.destroy().catch(() => { /* ignore */ });
+      sessions.delete(instituteId);
+      initLocks.delete(instituteId);
+      void pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+    }, 90_000);
   });
 
   client.on('ready', async () => {
-    state.qr = null; state.status = 'connected';
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+    state.qr = null;
+    state.status = 'connected';
+    initLocks.delete(instituteId);
     console.log(`[WA] ✅ Client READY for institute ${instituteId}`);
     await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
   });
   client.on('disconnected', async (reason) => {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.status = 'disconnected';
+    initLocks.delete(instituteId);
     console.log(`[WA] Disconnected institute ${instituteId}: ${reason}`);
     await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
   });
   client.on('auth_failure', (msg) => {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.status = 'disconnected';
+    initLocks.delete(instituteId);
     console.error(`[WA] Auth failure for institute ${instituteId}:`, msg);
   });
 
@@ -501,6 +549,7 @@ export async function disconnectSession(instituteId: string): Promise<void> {
   if (!s) return;
   try { await s.client.destroy(); } catch { /* ignore */ }
   sessions.delete(instituteId);
+  initLocks.delete(instituteId);
   await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
 }
 
