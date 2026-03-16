@@ -96,7 +96,7 @@ router.post('/register', async (req: Request, res: Response) => {
     const passwordHash = hashPassword(password);
     const result = await pool.query(
       `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
       [
         name.trim(),
         email.trim().toLowerCase(),
@@ -122,6 +122,7 @@ router.post('/register', async (req: Request, res: Response) => {
       website: websiteClean,
       plan,
       whatsapp_connected: false,
+      created_at: result.rows[0].created_at as string,
     });
   } catch (err) {
     console.error('Registration error:', err);
@@ -163,6 +164,7 @@ router.post('/login', async (req: Request, res: Response) => {
       website: institute.website ?? null,
       plan: institute.plan,
       whatsapp_connected: institute.whatsapp_connected ?? false,
+      created_at: institute.created_at,
     });
   } catch (err) {
     console.error('Login error:', err);
