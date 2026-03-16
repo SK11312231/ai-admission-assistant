@@ -6,6 +6,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
+import PremiumSection from '../components/PremiumSection';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -18,6 +19,7 @@ interface Institute {
   website: string | null;
   plan: string;
   whatsapp_connected: boolean;
+  created_at: string;
 }
 
 interface Lead {
@@ -60,7 +62,7 @@ interface PeakHour { hour: number; label: string; count: number; }
 interface StatusBreakdown { name: string; value: number; color: string; }
 
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
-type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training';
+type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training' | 'premium';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -772,6 +774,16 @@ export default function Dashboard() {
               : '🚫 Blocklist'}
           </button>
         ))}
+        {/* Premium tab — special gradient styling to make it stand out */}
+        <button
+          onClick={() => setActiveTab('premium')}
+          className={`px-4 py-2 text-sm font-bold transition-all border-b-2 -mb-px whitespace-nowrap ${
+            activeTab === 'premium'
+              ? 'border-amber-500 text-amber-600'
+              : 'border-transparent bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent hover:opacity-80'
+          }`}>
+          ⭐ Premium Features
+        </button>
       </div>
 
       {/* ── Leads Tab ────────────────────────────────────────────────────────── */}
@@ -1470,6 +1482,28 @@ export default function Dashboard() {
       {activeTab === 'training' && institute && (
         <div className="p-6">
           <TrainingSection instituteId={institute.id} />
+        </div>
+      )}
+
+      {/* ── Premium Tab ──────────────────────────────────────────────────────── */}
+      {activeTab === 'premium' && institute && (
+        <div className="p-6">
+          <div className="flex items-center gap-3 mb-6">
+            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-xl shadow-md">
+              ⭐
+            </div>
+            <div>
+              <h2 className="text-xl font-bold text-gray-900">Premium Features</h2>
+              <p className="text-sm text-gray-500 mt-0.5">
+                Everything InquiAI offers — unlock the full power of AI-driven admissions.
+              </p>
+            </div>
+          </div>
+          <PremiumSection
+            plan={institute.plan}
+            createdAt={institute.created_at}
+            onUpgradeClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+          />
         </div>
       )}
 
