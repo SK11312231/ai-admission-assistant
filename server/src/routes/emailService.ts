@@ -1,36 +1,67 @@
-import nodemailer from 'nodemailer';
+// ── SendGrid HTTP API email service ──────────────────────────────────────────
+//
+// Previously used nodemailer + SendGrid SMTP (port 587).
+// Railway blocks outbound SMTP on port 587 → ETIMEDOUT errors.
+// SendGrid HTTP API uses port 443 (HTTPS) — never blocked on Railway.
+// No npm packages needed beyond what's already installed (uses native fetch).
+//
+// Required Railway environment variables:
+//   SENDGRID_API_KEY  — your SendGrid API key (starts with SG.)
+//   SENDGRID_FROM     — verified sender email in your SendGrid account
+//                       Must be verified at: sendgrid.com → Settings → Sender Authentication
+//                       If not verified, SendGrid silently drops every email.
 
-// ── Transporter ──────────────────────────────────────────────────────────────
-
-let transporter: nodemailer.Transporter | null = null;
-
-function getTransporter(): nodemailer.Transporter {
-  if (!transporter) {
-    if (!process.env.EMAIL_USER || !process.env.EMAIL_PASS) {
-      throw new Error('EMAIL_USER and EMAIL_PASS environment variables are required.');
-    }
-    transporter = nodemailer.createTransport({
-      host: "smtp.sendgrid.net",
-      port: 587,
-      auth: {
-        user: "apikey",
-        pass: process.env.SENDGRID_API_KEY,
-      },
-      // service: 'gmail',
-      // auth: {
-      //   user: process.env.EMAIL_USER,
-      //   pass: process.env.EMAIL_PASS, // Gmail App Password (not your account password)
-      // },
-    });
-  }
-  return transporter;
+interface MailPayload {
+  to: string;
+  subject: string;
+  html: string;
 }
 
-// ── Base HTML wrapper ────────────────────────────────────────────────────────
+// ── Core send function (pure HTTPS, no nodemailer) ────────────────────────────
+
+async function sendEmail(payload: MailPayload): Promise<void> {
+  const apiKey = process.env.SENDGRID_API_KEY;
+  const fromEmail = process.env.SENDGRID_FROM ?? process.env.EMAIL_USER;
+
+  if (!apiKey) {
+    throw new Error('SENDGRID_API_KEY environment variable is not set.');
+  }
+  if (!fromEmail) {
+    throw new Error(
+      'SENDGRID_FROM environment variable is not set. ' +
+      'Set it to a verified sender email in your SendGrid account.',
+    );
+  }
+
+  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+    method: 'POST',
+    headers: {
+      'Authorization': `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      personalizations: [{ to: [{ email: payload.to }] }],
+      from: { email: fromEmail, name: 'InquiAI' },
+      subject: payload.subject,
+      content: [{ type: 'text/html', value: payload.html }],
+    }),
+  });
+
+  if (!response.ok) {
+    let details = '';
+    try {
+      const errBody = await response.json() as { errors?: Array<{ message: string }> };
+      details = errBody.errors?.map(e => e.message).join(', ') ?? '';
+    } catch { /* ignore json parse failure */ }
+    throw new Error(`SendGrid ${response.status}: ${details || response.statusText}`);
+  }
+  // 202 Accepted = queued successfully
+}
+
+// ── Base HTML template ────────────────────────────────────────────────────────
 
 function baseTemplate(title: string, body: string): string {
-  return `
-<!DOCTYPE html>
+  return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8"/>
@@ -41,24 +72,17 @@ function baseTemplate(title: string, body: string): string {
   <table width="100%" cellpadding="0" cellspacing="0" style="background:#f3f4f6;padding:32px 16px;">
     <tr><td align="center">
       <table width="600" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,0.1);">
-        <!-- Header -->
         <tr>
-          <td style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 32px;">
+          <td style="background:#4f46e5;padding:28px 32px;">
             <h1 style="margin:0;color:#ffffff;font-size:22px;font-weight:700;">🎓 InquiAI</h1>
             <p style="margin:4px 0 0;color:#c7d2fe;font-size:13px;">AI Admission Assistant</p>
           </td>
         </tr>
-        <!-- Body -->
-        <tr>
-          <td style="padding:32px;">
-            ${body}
-          </td>
-        </tr>
-        <!-- Footer -->
+        <tr><td style="padding:32px;">${body}</td></tr>
         <tr>
           <td style="background:#f9fafb;padding:20px 32px;border-top:1px solid #e5e7eb;">
             <p style="margin:0;color:#9ca3af;font-size:12px;text-align:center;">
-              This is an automated notification from InquiAI. Login to your dashboard to manage leads.
+              Automated notification from InquiAI. Login to your dashboard to manage leads.
             </p>
           </td>
         </tr>
@@ -73,11 +97,11 @@ function infoBox(content: string, color = '#4f46e5'): string {
   return `<div style="background:#f5f3ff;border-left:4px solid ${color};border-radius:8px;padding:16px 20px;margin:16px 0;">${content}</div>`;
 }
 
-function button(text: string, url: string): string {
+function ctaButton(text: string, url: string): string {
   return `<a href="${url}" style="display:inline-block;background:#4f46e5;color:#ffffff;text-decoration:none;padding:12px 24px;border-radius:8px;font-size:14px;font-weight:600;margin-top:20px;">${text}</a>`;
 }
 
-// ── 1. New Lead Notification ─────────────────────────────────────────────────
+// ── 1. New Lead Notification ──────────────────────────────────────────────────
 
 export async function sendNewLeadEmail(opts: {
   toEmail: string;
@@ -87,23 +111,25 @@ export async function sendNewLeadEmail(opts: {
   message: string;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, studentName, studentPhone, message, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
+  const {
+    toEmail, instituteName, studentName, studentPhone, message,
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
   const name = studentName ?? 'Unknown Student';
 
   const body = `
     <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">🔔 New Lead!</h2>
-    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">A new student has enquired via WhatsApp at <strong>${instituteName}</strong>.</p>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">A new student enquired via WhatsApp at <strong>${instituteName}</strong>.</p>
     ${infoBox(`
       <p style="margin:0 0 8px;font-size:15px;font-weight:600;color:#1f2937;">👤 ${name}</p>
       <p style="margin:0 0 4px;font-size:13px;color:#6b7280;">📱 ${studentPhone}</p>
       <p style="margin:12px 0 4px;font-size:13px;color:#374151;font-style:italic;">"${message.slice(0, 200)}${message.length > 200 ? '…' : ''}"</p>
     `)}
-    <p style="color:#6b7280;font-size:13px;">Log in to your dashboard to view the full conversation and manage this lead.</p>
-    ${button('View Lead →', dashboardUrl)}
+    <p style="color:#6b7280;font-size:13px;">Log in to view the full conversation and manage this lead.</p>
+    ${ctaButton('View Lead →', dashboardUrl)}
   `;
 
-  await getTransporter().sendMail({
-    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
+  await sendEmail({
     to: toEmail,
     subject: `🔔 New Lead: ${name} enquired at ${instituteName}`,
     html: baseTemplate('New Lead', body),
@@ -120,7 +146,10 @@ export async function sendFollowUpDueEmail(opts: {
   leads: Array<{ student_name: string | null; student_phone: string; notes: string | null; follow_up_date: string }>;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, leads, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
+  const {
+    toEmail, instituteName, leads,
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
   if (leads.length === 0) return;
 
   const leadRows = leads.map(l => `
@@ -144,11 +173,10 @@ export async function sendFollowUpDueEmail(opts: {
       </thead>
       <tbody>${leadRows}</tbody>
     </table>
-    ${button('Open Dashboard →', dashboardUrl)}
+    ${ctaButton('Open Dashboard →', dashboardUrl)}
   `;
 
-  await getTransporter().sendMail({
-    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
+  await sendEmail({
     to: toEmail,
     subject: `📅 ${leads.length} Follow-up${leads.length > 1 ? 's' : ''} Due Today — ${instituteName}`,
     html: baseTemplate('Follow-ups Due Today', body),
@@ -157,7 +185,7 @@ export async function sendFollowUpDueEmail(opts: {
   console.log(`[Email] Follow-up due email sent to ${toEmail} (${leads.length} leads)`);
 }
 
-// ── 3. 24h No-Reply Reminder ─────────────────────────────────────────────────
+// ── 3. 24h No-Reply Reminder ──────────────────────────────────────────────────
 
 export async function sendNoReplyReminderEmail(opts: {
   toEmail: string;
@@ -165,7 +193,10 @@ export async function sendNoReplyReminderEmail(opts: {
   leads: Array<{ student_name: string | null; student_phone: string; message: string; last_activity_at: string }>;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, leads, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
+  const {
+    toEmail, instituteName, leads,
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
   if (leads.length === 0) return;
 
   const leadRows = leads.map(l => `
@@ -178,7 +209,7 @@ export async function sendNoReplyReminderEmail(opts: {
 
   const body = `
     <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">💤 Students Haven't Replied in 24h</h2>
-    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;"><strong>${leads.length} student${leads.length > 1 ? 's' : ''}</strong> at <strong>${instituteName}</strong> haven't responded in over 24 hours. Consider sending a follow-up.</p>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;"><strong>${leads.length} student${leads.length > 1 ? 's' : ''}</strong> at <strong>${instituteName}</strong> haven't responded in over 24 hours.</p>
     <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #e5e7eb;border-radius:8px;overflow:hidden;">
       <thead>
         <tr style="background:#f9fafb;">
@@ -189,11 +220,10 @@ export async function sendNoReplyReminderEmail(opts: {
       </thead>
       <tbody>${leadRows}</tbody>
     </table>
-    ${button('Send Follow-ups →', dashboardUrl)}
+    ${ctaButton('Send Follow-ups →', dashboardUrl)}
   `;
 
-  await getTransporter().sendMail({
-    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
+  await sendEmail({
     to: toEmail,
     subject: `💤 ${leads.length} Student${leads.length > 1 ? 's' : ''} Haven't Replied — ${instituteName}`,
     html: baseTemplate('No Reply Reminder', body),
@@ -202,7 +232,7 @@ export async function sendNoReplyReminderEmail(opts: {
   console.log(`[Email] No-reply reminder sent to ${toEmail} (${leads.length} leads)`);
 }
 
-// ── 4. Weekly Summary ────────────────────────────────────────────────────────
+// ── 4. Weekly Summary ─────────────────────────────────────────────────────────
 
 export async function sendWeeklySummaryEmail(opts: {
   toEmail: string;
@@ -215,7 +245,10 @@ export async function sendWeeklySummaryEmail(opts: {
   conversionRate: string;
   dashboardUrl?: string;
 }): Promise<void> {
-  const { toEmail, instituteName, totalLeads, newThisWeek, contacted, converted, lost, conversionRate, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in' } = opts;
+  const {
+    toEmail, instituteName, totalLeads, newThisWeek, contacted, converted, lost,
+    conversionRate, dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
 
   function statBox(emoji: string, label: string, value: number | string, bg: string, color: string): string {
     return `
@@ -243,11 +276,10 @@ export async function sendWeeklySummaryEmail(opts: {
       <p style="margin:0 0 8px;font-size:13px;font-weight:600;color:#374151;">Lead Status Breakdown</p>
       <p style="margin:0;font-size:13px;color:#6b7280;">🆕 New: <strong>${newThisWeek}</strong> &nbsp;|&nbsp; 📞 Contacted: <strong>${contacted}</strong> &nbsp;|&nbsp; ✅ Converted: <strong>${converted}</strong> &nbsp;|&nbsp; ❌ Lost: <strong>${lost}</strong></p>
     `, '#6366f1')}
-    ${button('View Full Dashboard →', dashboardUrl)}
+    ${ctaButton('View Full Dashboard →', dashboardUrl)}
   `;
 
-  await getTransporter().sendMail({
-    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
+  await sendEmail({
     to: toEmail,
     subject: `📊 Weekly Summary — ${instituteName} (${newThisWeek} new leads this week)`,
     html: baseTemplate('Weekly Summary', body),
@@ -256,7 +288,7 @@ export async function sendWeeklySummaryEmail(opts: {
   console.log(`[Email] Weekly summary sent to ${toEmail}`);
 }
 
-// ── 5. Upgrade Plan Request (Admin Notification) ─────────────────────────────
+// ── 5. Plan Upgrade Request (Admin Notification) ──────────────────────────────
 
 export async function sendUpgradeRequestEmail(opts: {
   adminEmail: string;
@@ -269,13 +301,8 @@ export async function sendUpgradeRequestEmail(opts: {
   dashboardUrl?: string;
 }): Promise<void> {
   const {
-    adminEmail,
-    instituteName,
-    instituteEmail,
-    institutePhone,
-    currentPlan,
-    requestedPlan,
-    requestId,
+    adminEmail, instituteName, instituteEmail, institutePhone,
+    currentPlan, requestedPlan, requestId,
     dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
   } = opts;
 
@@ -284,10 +311,7 @@ export async function sendUpgradeRequestEmail(opts: {
 
   const body = `
     <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">⬆️ Plan Upgrade Request</h2>
-    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">
-      An institute has requested to upgrade their plan. Please review and action this request.
-    </p>
-
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">An institute has requested to upgrade. Please review and approve.</p>
     ${infoBox(`
       <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1f2937;">🏫 ${instituteName}</p>
       <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">📧 ${instituteEmail}</p>
@@ -295,31 +319,26 @@ export async function sendUpgradeRequestEmail(opts: {
       <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">Request ID: <strong>#${requestId}</strong></p>
       <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
       <p style="margin:0 0 4px;font-size:13px;color:#374151;">
-        Current Plan: <span style="background:#f3f4f6;color:#374151;padding:2px 8px;border-radius:4px;font-weight:600;">${currentLabel}</span>
+        Current: <span style="background:#f3f4f6;color:#374151;padding:2px 8px;border-radius:4px;font-weight:600;">${currentLabel}</span>
       </p>
       <p style="margin:8px 0 0;font-size:14px;color:#374151;">
-        Requested Plan: <span style="background:#ede9fe;color:#4f46e5;padding:2px 8px;border-radius:4px;font-weight:700;">${planLabel}</span>
+        Requested: <span style="background:#ede9fe;color:#4f46e5;padding:2px 8px;border-radius:4px;font-weight:700;">${planLabel}</span>
       </p>
     `, '#f59e0b')}
-
-    <p style="color:#6b7280;font-size:13px;margin-top:20px;">
-      To approve this upgrade, update the institute's plan in your admin panel or run the following:
-    </p>
+    <p style="color:#6b7280;font-size:13px;margin-top:20px;">To approve, update the plan via API:</p>
     <div style="background:#1f2937;border-radius:8px;padding:14px 18px;margin:12px 0;">
       <code style="color:#a5f3fc;font-size:12px;font-family:monospace;">
         PATCH /api/institutes/&lt;id&gt;/plan  →  { "plan": "${requestedPlan}" }
       </code>
     </div>
-
-    ${button('Open Dashboard →', dashboardUrl)}
+    ${ctaButton('Open Dashboard →', dashboardUrl)}
   `;
 
-  await getTransporter().sendMail({
-    from: `"InquiAI" <${process.env.EMAIL_USER}>`,
+  await sendEmail({
     to: adminEmail,
     subject: `⬆️ Upgrade Request: ${instituteName} → ${planLabel} Plan`,
     html: baseTemplate('Plan Upgrade Request', body),
   });
 
-  console.log(`[Email] Upgrade request email sent to admin (${adminEmail}) for institute: ${instituteName}`);
+  console.log(`[Email] Upgrade request sent to ${adminEmail} for: ${instituteName}`);
 }
