@@ -10,11 +10,17 @@ function getTransporter(): nodemailer.Transporter {
       throw new Error('EMAIL_USER and EMAIL_PASS environment variables are required.');
     }
     transporter = nodemailer.createTransport({
-      service: 'gmail',
+      host: "smtp.sendgrid.net",
+      port: 587,
       auth: {
-        user: process.env.EMAIL_USER,
-        pass: process.env.EMAIL_PASS, // Gmail App Password (not your account password)
+        user: "apikey",
+        pass: process.env.SENDGRID_API_KEY,
       },
+      // service: 'gmail',
+      // auth: {
+      //   user: process.env.EMAIL_USER,
+      //   pass: process.env.EMAIL_PASS, // Gmail App Password (not your account password)
+      // },
     });
   }
   return transporter;
