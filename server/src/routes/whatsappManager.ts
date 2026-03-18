@@ -21,32 +21,26 @@ interface MessageRow {
   content: string;
 }
 
-type ConversationState =
-  | 'GREETING'
-  | 'EXPLORING'
-  | 'BOOKING'
-  | 'CLOSING'
-  | 'LOOP'
-  | 'OBJECTION';
-
 // ── In-memory session store ──────────────────────────────────────────────────
 
 const sessions = new Map<string, SessionState>();
-
-// Initialization lock — prevents multiple concurrent initSession calls for the
-// same institute from all racing past the guard and creating 3 client instances.
-// This was causing "authenticated 3x" in logs.
 const initLocks = new Set<string>();
 
-// ── Lazy OpenAI/Groq client ──────────────────────────────────────────────────
+// ── GPT-4o-mini client ───────────────────────────────────────────────────────
+// Switched from Groq/Llama to GPT-4o-mini:
+//   1. No rate limit 429 errors — Groq free tier was throttling when multiple
+//      students messaged simultaneously, causing the fallback loop bug
+//   2. Single API call — classifier + reply merged into one call (half the usage)
+//   3. Better instruction following for CLOSING/LOOP states
+//   4. Better Hindi/Hinglish support for Indian students
 
 let openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
   if (!openai) {
-    if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is not set.');
+    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set.');
     openai = new OpenAI({
-      apiKey: process.env.GROQ_API_KEY,
-      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: 'https://api.openai.com/v1',
     });
   }
   return openai;
@@ -97,11 +91,12 @@ async function saveLead(
       return;
     }
 
+    // New lead — name extraction (runs after reply to avoid concurrent API calls)
     let studentName: string | null = null;
     try {
       const client = getOpenAI();
       const completion = await client.chat.completions.create({
-        model: 'llama-3.3-70b-versatile',
+        model: 'gpt-4o-mini',
         messages: [
           { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
           { role: 'user', content: message },
@@ -142,69 +137,20 @@ async function saveLead(
   }
 }
 
-// ── Stage 1: Classify conversation state ─────────────────────────────────────
-
-async function classifyConversationState(
-  history: MessageRow[],
-  currentMessage: string,
-): Promise<ConversationState> {
-  try {
-    const recent = history.slice(-6);
-    const transcript = recent
-      .map(m => `${m.role === 'user' ? 'Student' : 'AI'}: ${m.content.slice(0, 200)}`)
-      .join('\n');
-
-    const client = getOpenAI();
-    const result = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
-      messages: [{
-        role: 'user',
-        content:
-          `Classify the state of this WhatsApp admission enquiry.\n\n` +
-          `Recent conversation:\n${transcript || '(no history)'}\n\n` +
-          `Latest message: "${currentMessage}"\n\n` +
-          `Reply ONE word only:\n` +
-          `GREETING   — first contact\n` +
-          `EXPLORING  — asking about courses, fees, eligibility, batches\n` +
-          `BOOKING    — wants to book demo, visit, or speak with someone\n` +
-          `CLOSING    — thanks, bye, ok, got it, noted — wrapping up\n` +
-          `LOOP       — AI already answered this before\n` +
-          `OBJECTION  — too expensive, needs time, not sure\n\nState:`,
-      }],
-      temperature: 0,
-      max_tokens: 5,
-    });
-
-    const raw = result.choices[0]?.message?.content?.trim().toUpperCase() ?? '';
-    const valid: ConversationState[] = ['GREETING', 'EXPLORING', 'BOOKING', 'CLOSING', 'LOOP', 'OBJECTION'];
-    const state = valid.find(s => raw.startsWith(s)) ?? 'EXPLORING';
-    console.log(`[WA] State: ${state}`);
-    return state;
-  } catch (err) {
-    console.error('[WA] classifyState failed:', err);
-    return 'EXPLORING';
-  }
-}
-
-// ── Stage 2: Build system prompt (state + knowledge + personality + RAG) ─────
+// ── Build system prompt (single-call architecture) ───────────────────────────
 //
-// This is the core of the personalisation feature.
-// Every reply now has four layers of context:
+// The prompt asks GPT-4o-mini to:
+//   1. Detect the conversation state from the history
+//   2. Follow the matching state instruction
+//   3. Output: first line = "STATE: X", remaining lines = the reply
 //
-//   1. STATE INSTRUCTION  — what kind of reply to produce right now
-//   2. INSTITUTE DATA     — courses, fees, enriched profile from website
-//   3. PERSONALITY PROFILE — how this specific counselor communicates
-//                            (learned from uploaded real WhatsApp chats)
-//   4. RELEVANT EXAMPLES   — 3-4 real past conversations most similar to
-//                            the current student message (RAG retrieval)
-//
-// If an institute hasn't uploaded training data yet, layers 3 & 4 are skipped
-// and the AI falls back to the generic few-shot examples.
+// This replaces the previous two-call architecture (classifier + reply).
+// One call = no race conditions, no rate limit issues from concurrent calls.
 
 async function buildSystemPrompt(
   instituteId: number,
-  state: ConversationState,
   studentMessage: string,
+  recentHistory: MessageRow[],
 ): Promise<string> {
   try {
     const instResult = await pool.query(
@@ -223,115 +169,114 @@ async function buildSystemPrompt(
     }
 
     const contextSection = instituteData
-      ? `You have the following detailed information about ${instituteName}:\n\n${instituteData}`
-      : `You are representing ${instituteName}. Detailed profile is still being generated. ` +
-        `Ask the student what they want to know (courses, fees, eligibility) so you can help.`;
+      ? `INSTITUTE INFORMATION about ${instituteName}:\n\n${instituteData}`
+      : `You represent ${instituteName}. Detailed info is still loading. Ask what the student wants to know.`;
 
     const bookingAction = website
-      ? `Tell them: "Please visit ${website} to book your free demo, or share your phone number and our team will call you back."`
-      : `Tell them: "Please share your phone number and our team will call you back to schedule your demo."`;
+      ? `Direct them: "Please visit ${website} to book your free demo, or share your phone number and our team will call you back."`
+      : `Direct them: "Please share your phone number and our team will call you back to schedule your demo."`;
 
-    // ── State-specific directive ──────────────────────────────────────────────
-    const stateInstructions: Record<ConversationState, string> = {
-      GREETING:
-        `STATE: GREETING — Welcome the student briefly. Ask ONE open question to understand ` +
-        `what they are looking for. Do not list all courses yet.`,
-      EXPLORING:
-        `STATE: EXPLORING — Answer their question using the institute info below. ` +
-        `Then ask ONE follow-up question to move toward a demo booking. ` +
-        `Do not repeat anything already said in this conversation.`,
-      BOOKING:
-        `STATE: BOOKING — ${bookingAction} Do NOT ask more questions. Just give the next step and stop.`,
-      CLOSING:
-        `STATE: CLOSING — Student is ending the conversation. ` +
-        `Reply with 1-2 warm closing sentences ONLY. No new questions. No more pitching. Stop.`,
-      LOOP:
-        `STATE: LOOP — You have already given this information. Do NOT repeat it. ` +
-        `Give ONE concrete next step (booking or callback) and stop.`,
-      OBJECTION:
-        `STATE: OBJECTION — Acknowledge their concern warmly in one sentence, then address it. ` +
-        `If they need time, offer a follow-up and ask for their number.`,
-    };
-
-    // ── Layer 3 & 4: Fetch training data in parallel ──────────────────────────
-    // Both are DB reads — run together to save time
+    // Training data: personality profile + relevant past examples
     const [personality, relevantExamples] = await Promise.all([
       getPersonalityProfile(instituteId),
       getRelevantExamples(instituteId, studentMessage, 4),
     ]);
 
-    // ── Build personality section ─────────────────────────────────────────────
     let personalitySection = '';
     if (personality) {
       const langNote =
         personality.languageStyle === 'hinglish'
           ? '\nLANGUAGE: This counselor writes in Hinglish (Hindi + English mix). Match this naturally.'
           : personality.languageStyle === 'hindi'
-          ? '\nLANGUAGE: This counselor writes primarily in Hindi. Match this.'
+          ? '\nLANGUAGE: This counselor writes in Hindi. Reply in Hindi.'
           : '';
-
       personalitySection =
-        `\n\n---\n\nCOUNSELOR COMMUNICATION PROFILE\n` +
-        `(Learned from this institute's real WhatsApp conversations — follow this style closely)\n\n` +
+        `\n\n---\n\nCOUNSELOR STYLE (learned from real conversations — follow this):\n\n` +
         `${personality.profile}${langNote}`;
-
-      console.log(`[WA] Personality profile injected (${personality.languageStyle})`);
+      console.log(`[WA] Personality injected (${personality.languageStyle})`);
     }
 
-    // ── Build RAG examples section ────────────────────────────────────────────
     let examplesSection = '';
     if (relevantExamples.length > 0) {
       const examplesText = relevantExamples
         .map((ex, i) =>
-          `[Real Example ${i + 1} — ${ex.category}]\n` +
-          `Student: ${ex.studentMessage}\n` +
-          `Counselor: ${ex.ownerReply}`,
-        )
-        .join('\n\n');
-
+          `[Example ${i + 1}]\nStudent: ${ex.studentMessage}\nCounselor: ${ex.ownerReply}`,
+        ).join('\n\n');
       examplesSection =
-        `\n\n---\n\nREAL PAST CONVERSATIONS from this institute\n` +
-        `(These are how the actual counselor responded to similar questions — use their style)\n\n` +
-        `${examplesText}\n\n` +
-        `Adapt the style and approach from these examples. Do not copy word-for-word.`;
-
-      console.log(`[WA] ${relevantExamples.length} relevant examples injected`);
+        `\n\n---\n\nREAL PAST CONVERSATIONS (match this style):\n\n${examplesText}`;
+      console.log(`[WA] ${relevantExamples.length} RAG examples injected`);
     }
 
-    // ── Generic fallback examples (only when no training data at all) ─────────
-    const fallbackExamples =
-      !personality && relevantExamples.length === 0
-        ? `\n\n---\n\nCONVERSATION STYLE EXAMPLES:\n\n` +
-          `[Closing] Student: ok thanks → Reply: You're welcome! Feel free to reach out anytime. 😊\n\n` +
-          `[Booking] Student: I want to book a demo → Reply: ${
-            website
-              ? `Great! Please visit ${website} to book your free demo, or share your number and we'll call you.`
-              : `Great! Share your number and our team will call you back to schedule it.`
-          }\n\n` +
-          `[Loop] Student: Yes → Reply: ${
-            website
-              ? `The easiest next step is to visit ${website} and book a free demo. Our team will walk you through everything.`
-              : `Please share your number and our team will call you to set everything up.`
-          }`
-        : '';
+    const recentTranscript = recentHistory.slice(-6)
+      .map(m => `${m.role === 'user' ? 'Student' : 'AI'}: ${m.content.slice(0, 200)}`)
+      .join('\n');
+
+    // Check if student's phone number already appears in history
+    const phoneAlreadyShared = recentHistory.some(m =>
+      m.role === 'user' && /\b[6-9]\d{9}\b/.test(m.content),
+    );
 
     return (
-      `You are an AI admission assistant for ${instituteName}.\n\n` +
-      `CURRENT INSTRUCTION: ${stateInstructions[state]}\n\n` +
-      `---\n\nINSTITUTE INFORMATION:\n${contextSection}` +
+      `You are an AI admission assistant for ${instituteName}, responding on WhatsApp.\n\n` +
+
+      `STEP 1 — READ THE CONVERSATION STATE\n` +
+      `Analyse the conversation below and identify the current state:\n\n` +
+      `GREETING   — first contact, student just said hi or introduced themselves\n` +
+      `EXPLORING  — asking about courses, fees, duration, eligibility, placement, trainers\n` +
+      `BOOKING    — explicitly wants to book a demo, visit, or speak with a counselor\n` +
+      `CLOSING    — saying thanks, ok, bye, nice talking, done, goodbye — ending the conversation\n` +
+      `LOOP       — AI already answered this same question earlier in this conversation\n` +
+      `OBJECTION  — concern about price, budget, timing, not sure, needs to think\n\n` +
+
+      `Recent conversation:\n${recentTranscript || '(new conversation)'}\n\n` +
+
+      `STEP 2 — REPLY BASED ON STATE\n\n` +
+
+      `GREETING → Welcome briefly. Ask ONE open question about what they are looking for. Do NOT list all courses.\n\n` +
+
+      `EXPLORING → Answer their specific question using the institute info below. ` +
+      `Maximum 3-4 sentences. End with ONE relevant follow-up. Do not repeat what was said earlier.\n\n` +
+
+      `BOOKING → ${bookingAction} Stop here. No more questions.\n\n` +
+
+      `CLOSING → 1-2 warm sentences ONLY. Example: "You're welcome! Feel free to reach out anytime. 😊" ` +
+      `Do NOT ask a question. Do NOT recommend courses. Do NOT say "What brings you here". Just say goodbye.\n\n` +
+
+      `LOOP → Do NOT repeat the information. Give ONE clear next step (booking or callback) and stop.\n\n` +
+
+      `OBJECTION → Acknowledge the concern warmly in one sentence. Then address it. ` +
+      `If budget is low, suggest a cheaper course or EMI. If they need time, offer to follow up later.\n\n` +
+
+      `---\n\n` +
+      `${contextSection}` +
       personalitySection +
       examplesSection +
-      fallbackExamples +
-      `\n\n---\n\nHARD RULES (always apply):\n` +
-      `- Plain text only — no markdown, no asterisks, no bullet dashes.\n` +
-      `- Maximum 3 short paragraphs. WhatsApp must be readable on a phone screen.\n` +
-      `- Never repeat information already given in this conversation.\n` +
-      `- Never ask more than one question per message.\n` +
-      `- Never invent fees, dates, or details not in the institute information above.`
+      `\n\n---\n\n` +
+
+      `LANGUAGE RULE:\n` +
+      `If the student writes in Hindi or Hinglish, reply in Hinglish naturally. ` +
+      `If they write in English, reply in English. Match their style.\n\n` +
+
+      (phoneAlreadyShared ? `IMPORTANT: The student already shared their phone number in this conversation. Do NOT ask for it again.\n\n` : '') +
+
+      `OUTPUT FORMAT (follow exactly):\n` +
+      `STATE: <one word>\n` +
+      `<your reply>\n\n` +
+
+      `RULES:\n` +
+      `- Plain text only. No asterisks, no bullet points, no markdown.\n` +
+      `- Maximum 4 sentences. This is WhatsApp on a phone.\n` +
+      `- One question per message maximum.\n` +
+      `- Never repeat information already in this conversation.\n` +
+      `- Never invent fees, dates, or details not in the institute info above.`
     );
   } catch (err) {
     console.error(`[WA] buildSystemPrompt failed:`, err);
-    return `You are a helpful AI admission assistant. Reply warmly and concisely in plain text.`;
+    return (
+      `You are a helpful AI admission assistant. Reply warmly in plain text.\n` +
+      `First line must be: STATE: EXPLORING\n` +
+      `Then write your reply.`
+    );
   }
 }
 
@@ -358,34 +303,55 @@ async function getAIReply(
       [sessionId, 'user', messageText.trim()],
     );
 
-    const state = await classifyConversationState(history, messageText);
+    const systemPrompt = await buildSystemPrompt(instituteId, messageText, history);
 
-    // Pass studentMessage to buildSystemPrompt for RAG retrieval
-    const systemPrompt = await buildSystemPrompt(instituteId, state, messageText);
-    console.log(`[WA] Calling Groq (state: ${state})...`);
-
+    console.log(`[WA] Calling GPT-4o-mini...`);
     const client = getOpenAI();
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
         ...history.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: messageText.trim() },
       ],
-      temperature: state === 'CLOSING' || state === 'BOOKING' ? 0.3 : 0.7,
-      max_tokens: state === 'CLOSING' ? 80 : state === 'BOOKING' ? 120 : 400,
+      temperature: 0.7,
+      max_tokens: 350,
     });
 
-    const reply = completion.choices[0]?.message?.content?.trim()
-      || 'Sorry, I could not generate a response.';
-    console.log(`[WA] Groq reply (${reply.length} chars): ${reply.slice(0, 80)}`);
+    const rawOutput = completion.choices[0]?.message?.content?.trim() ?? '';
+    if (!rawOutput) return null;
+
+    // Parse STATE from first line, reply from the rest
+    const lines = rawOutput.split('\n').filter(l => l.trim() !== '');
+    const firstLine = lines[0]?.trim() ?? '';
+    let detectedState = 'EXPLORING';
+    let reply = rawOutput;
+
+    if (firstLine.toUpperCase().startsWith('STATE:')) {
+      detectedState = firstLine.replace(/^STATE:\s*/i, '').trim().toUpperCase();
+      reply = lines.slice(1).join('\n').trim();
+      if (!reply) reply = rawOutput; // fallback if model put everything on one line
+    }
+
+    console.log(`[WA] State: ${detectedState} | Reply (${reply.length} chars): ${reply.slice(0, 100)}`);
+
+    // Hard character limits per state to prevent walls of text
+    const charLimits: Record<string, number> = {
+      CLOSING: 180,
+      LOOP: 250,
+      BOOKING: 280,
+    };
+    const limit = charLimits[detectedState];
+    const finalReply = limit && reply.length > limit
+      ? reply.slice(0, reply.lastIndexOf(' ', limit)) + '.'
+      : reply;
 
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
-      [sessionId, 'assistant', reply],
+      [sessionId, 'assistant', finalReply],
     );
 
-    return reply;
+    return finalReply;
   } catch (err) {
     console.error(`[WA] getAIReply FAILED:`, err);
     return null;
@@ -393,25 +359,11 @@ async function getAIReply(
 }
 
 // ── Puppeteer client factory ─────────────────────────────────────────────────
-//
-// Chrome flag notes for Railway:
-// - --no-sandbox + --disable-setuid-sandbox: required in containers
-// - --disable-dev-shm-usage: prevents /dev/shm OOM crashes
-// - --no-zygote: REMOVED — without --single-process, this breaks renderer spawning
-// - --single-process: REMOVED — causes silent crash after QR auth
-// - --disable-gpu: safe, no GPU in container
-// The minimal safe set below is proven to work in Railway/Docker environments.
 
 function makeClient(instituteId: string): Client {
   return new Client({
     authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
-    // Force whatsapp-web.js to use its own bundled WA Web version.
-    // Without this, it loads whatever WhatsApp is currently serving.
-    // If that version is incompatible with the installed library, the injection
-    // script fails silently — authenticated fires but loading_screen never does.
-    webVersionCache: {
-      type: 'local',
-    },
+    webVersionCache: { type: 'local' },
     puppeteer: {
       args: [
         '--no-sandbox',
@@ -432,11 +384,8 @@ function makeClient(instituteId: string): Client {
 // ── Init session ─────────────────────────────────────────────────────────────
 
 export async function initSession(instituteId: string): Promise<void> {
-  // Lock guard — if another call is already initializing this institute, skip.
-  // Without this, concurrent calls (restoreAllSessions + user click) all race
-  // past the status check before status is set, creating 3 client instances.
   if (initLocks.has(instituteId)) {
-    console.log(`[WA] initSession skipped — already initializing institute ${instituteId}`);
+    console.log(`[WA] initSession skipped — already initializing ${instituteId}`);
     return;
   }
 
@@ -451,8 +400,6 @@ export async function initSession(instituteId: string): Promise<void> {
   const state: SessionState = { client, qr: null, status: 'initializing' };
   sessions.set(instituteId, state);
 
-  // Watchdog: if 'ready' doesn't fire within 90s after 'authenticated',
-  // destroy the session so the institute can try again rather than hanging forever.
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
   client.on('qr', (qr) => {
@@ -466,19 +413,16 @@ export async function initSession(instituteId: string): Promise<void> {
   });
 
   client.on('authenticated', () => {
-    // whatsapp-web.js fires 'authenticated' once per linked device on the phone.
-    // Guard the watchdog so it only starts ONCE no matter how many times this fires.
-    if (watchdogTimer !== null) return;
+    if (watchdogTimer !== null) return; // guard — fires once per linked device
     console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
 
-    // Listen for page-level errors to diagnose why loading_screen never fires
     void (client as unknown as { pupPage?: { on?: (e: string, cb: (err: Error) => void) => void } })
       .pupPage?.on?.('pageerror', (err: Error) => {
         console.error(`[WA] Page error for institute ${instituteId}:`, err.message?.slice(0, 200));
       });
 
     watchdogTimer = setTimeout(() => {
-      console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s. Destroying session.`);
+      console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s.`);
       void state.client.destroy().catch(() => { /* ignore */ });
       sessions.delete(instituteId);
       initLocks.delete(instituteId);
@@ -494,6 +438,7 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] ✅ Client READY for institute ${instituteId}`);
     await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
   });
+
   client.on('disconnected', async (reason) => {
     if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.status = 'disconnected';
@@ -501,6 +446,7 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] Disconnected institute ${instituteId}: ${reason}`);
     await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
   });
+
   client.on('auth_failure', (msg) => {
     if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.status = 'disconnected';
@@ -527,17 +473,18 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] ===== INCOMING =====`);
     console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
 
-    // Reply FIRST — saveLead AFTER (prevents concurrent Groq calls)
+    // Reply FIRST, saveLead AFTER — avoids concurrent API calls
     try {
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
       if (reply) {
         await client.sendMessage(msg.from, reply);
         console.log(`[WA] ===== REPLY SENT =====`);
       } else {
-        const r = await pool.query('SELECT name FROM institutes WHERE id = $1', [Number(instituteId)]);
-        const fallback = `Thank you for contacting ${r.rows[0]?.name ?? 'us'}! We received your message and will get back to you shortly.`;
-        await client.sendMessage(msg.from, fallback);
-        console.log(`[WA] ===== FALLBACK SENT =====`);
+        // GPT returned null — log only, no fallback
+        // The previous fallback "Thank you for contacting..." was sending on every
+        // rate-limited message, causing the repeated identical message bug.
+        // Silent failure is better than spamming the student.
+        console.error(`[WA] GPT returned null — no reply sent. Check OPENAI_API_KEY and quota.`);
       }
     } catch (err) {
       console.error(`[WA] Failed to send reply:`, err);
@@ -566,7 +513,9 @@ export async function disconnectSession(instituteId: string): Promise<void> {
 }
 
 export async function sendMessageToStudent(
-  instituteId: string, toNumber: string, message: string,
+  instituteId: string,
+  toNumber: string,
+  message: string,
 ): Promise<boolean> {
   const s = sessions.get(instituteId);
   if (!s || s.status !== 'connected') return false;
