@@ -265,9 +265,9 @@ export default function Home() {
         <p className="font-semibold text-white mb-1">InquiAI</p>
         <p>AI-powered admission assistant for institutes, coaching centers & universities.</p>
         <div className="mt-3 flex justify-center gap-4 text-xs text-gray-500">
-          <Link to="/privacy-policy" className="hover:text-indigo-400 transition-colors">Privacy Policy</Link>
+          <Link to="/privacy-policy.html" className="hover:text-indigo-400 transition-colors">Privacy Policy</Link>
           <span>·</span>
-          <Link to="/terms-of-service" className="hover:text-indigo-400 transition-colors">Terms of Service</Link>
+          <Link to="/terms-of-service.html" className="hover:text-indigo-400 transition-colors">Terms of Service</Link>
         </div>
         <p className="mt-2 text-xs text-gray-600">© {new Date().getFullYear()} InquiAI. All rights reserved.</p>
       </footer>
