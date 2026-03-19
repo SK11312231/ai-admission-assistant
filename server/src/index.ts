@@ -16,6 +16,7 @@ import blocklistRouter from './routes/blocklist';
 import analyticsRouter from './routes/analytics';
 import widgetRouter from './routes/widget';
 import adminRouter from './routes/admin';
+import embeddedSignupRouter from './routes/embeddedSignup';
 import trainingRouter from './routes/chatTraining';  // ← AI Training feature
 
 const app = express();
@@ -67,6 +68,7 @@ app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/blocklist', defaultLimiter, blocklistRouter);
 app.use('/api/analytics', defaultLimiter, analyticsRouter);
 app.use('/api/training', defaultLimiter, trainingRouter);  // ← AI Training feature
+app.use('/api/whatsapp', defaultLimiter, embeddedSignupRouter);  // ← Meta Embedded Signup
 app.use('/api/widget', widgetRouter);
 app.use('/api/admin', defaultLimiter, adminRouter);
 app.use('/api/webhook', webhookRouter);

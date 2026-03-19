@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
+import EmbeddedSignup from '../components/EmbeddedSignup';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -19,6 +20,8 @@ interface Institute {
   website: string | null;
   plan: string;
   whatsapp_connected: boolean;
+  whatsapp_waba_id?: string | null;
+  whatsapp_phone_number_id?: string | null;
   created_at: string;
 }
 
@@ -62,7 +65,7 @@ interface PeakHour { hour: number; label: string; count: number; }
 interface StatusBreakdown { name: string; value: number; color: string; }
 
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
-type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training' | 'premium';
+type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training' | 'premium' | 'whatsapp';
 
 // ── Trial helper ──────────────────────────────────────────────────────────────
 
@@ -498,6 +501,7 @@ export default function Dashboard() {
   // Nav items config
   const coreNav: { id: Tab; label: string; emoji: string }[] = [
     { id: 'leads', label: 'Leads', emoji: '📋' },
+    { id: 'whatsapp', label: 'WhatsApp', emoji: '📱' },
     { id: 'profile', label: 'Institute Profile', emoji: '🏫' },
     { id: 'blocklist', label: 'Blocklist', emoji: '🚫' },
   ];
@@ -511,6 +515,7 @@ export default function Dashboard() {
   const pageTitles: Record<Tab, string> = {
     leads: 'Leads', analytics: 'Analytics', profile: 'Institute Profile',
     blocklist: 'Blocklist', widget: 'Chat Widget', training: 'AI Training', premium: 'Premium Features',
+    whatsapp: 'WhatsApp Connect',
   };
 
   return (
@@ -1845,6 +1850,49 @@ export default function Dashboard() {
               </div>
             </>
           )}
+        </div>
+      )}
+
+      {/* ── WhatsApp Tab ─────────────────────────────────────────────────────── */}
+      {activeTab === 'whatsapp' && institute && (
+        <div>
+          <div className="flex items-center gap-3 mb-6">
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #25D366, #128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
+              📱
+            </div>
+            <div>
+              <h2 className="text-base font-semibold text-gray-900">WhatsApp Connect</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Connect your WhatsApp Business Account via Meta Embedded Signup.</p>
+            </div>
+          </div>
+          <div className="max-w-xl">
+            <EmbeddedSignup
+              instituteId={institute.id}
+              isConnected={institute.whatsapp_connected}
+              wabaId={institute.whatsapp_waba_id ?? null}
+              phoneNumberId={institute.whatsapp_phone_number_id ?? null}
+              onConnected={(wabaId, phoneNumberId) => {
+                const updated = {
+                  ...institute,
+                  whatsapp_connected: true,
+                  whatsapp_waba_id: wabaId,
+                  whatsapp_phone_number_id: phoneNumberId,
+                };
+                setInstitute(updated);
+                localStorage.setItem('institute', JSON.stringify(updated));
+              }}
+              onDisconnected={() => {
+                const updated = {
+                  ...institute,
+                  whatsapp_connected: false,
+                  whatsapp_waba_id: null,
+                  whatsapp_phone_number_id: null,
+                };
+                setInstitute(updated);
+                localStorage.setItem('institute', JSON.stringify(updated));
+              }}
+            />
+          </div>
         </div>
       )}
 

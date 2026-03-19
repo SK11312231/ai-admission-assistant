@@ -374,9 +374,19 @@ function makeClient(instituteId: string): Client {
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
+        '--hide-scrollbars',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--no-zygote',
+        '--single-process',              // ← key fix for Railway sandbox
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
+      timeout: 60000,                    // ← increase launch timeout to 60s
     },
   });
 }

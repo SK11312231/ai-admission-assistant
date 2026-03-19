@@ -1,11 +1,32 @@
 [phases.setup]
-nixPkgs = ["nodejs_20", "chromium"]
+nixPkgs = [
+  "chromium",
+  "nss",
+  "freetype",
+  "harfbuzz",
+  "ca-certificates",
+  "glib",
+  "dbus",
+  "xorg.libX11",
+  "xorg.libXcomposite",
+  "xorg.libXcursor",
+  "xorg.libXdamage",
+  "xorg.libXext",
+  "xorg.libXi",
+  "xorg.libXrandr",
+  "xorg.libXrender",
+  "xorg.libXtst",
+  "xorg.libxcb",
+  "xorg.libXScrnSaver",
+  "alsa-lib",
+  "atk",
+  "cups",
+  "gtk3",
+  "pango",
+  "libdrm",
+  "mesa",
+]
 
-[phases.install]
-cmds = ["npm install"]
-
-[phases.build]
-cmds = ["which chromium || which chromium-browser || find / -name 'chromium' 2>/dev/null | head -5", "npm run build --workspace=server", "npm run build --workspace=client"]
-
-[start]
-cmd = "node server/dist/index.js"
+[variables]
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
+PUPPETEER_EXECUTABLE_PATH = "/run/current-system/sw/bin/chromium"
