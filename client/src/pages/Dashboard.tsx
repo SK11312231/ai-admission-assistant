@@ -64,6 +64,18 @@ interface StatusBreakdown { name: string; value: number; color: string; }
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
 type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training' | 'premium';
 
+// ── Trial helper ──────────────────────────────────────────────────────────────
+
+function getTrialDaysLeft(createdAt: string): number {
+  const created = new Date(createdAt).getTime();
+  const daysUsed = Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24));
+  return Math.max(0, 30 - daysUsed);
+}
+
+function isTrialExpired(createdAt: string): boolean {
+  return getTrialDaysLeft(createdAt) === 0;
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
@@ -474,10 +486,39 @@ export default function Dashboard() {
 
   if (!institute) return null;
 
-  return (
-    <div className="max-w-6xl mx-auto px-4 py-8">
+  const isPaid = isPremium(institute.plan);
+  const trialLeft = institute.created_at ? getTrialDaysLeft(institute.created_at) : 30;
+  const trialExpired = institute.created_at ? isTrialExpired(institute.created_at) : false;
+  // Premium features accessible during trial OR on paid plan
+  const premiumUnlocked = isPaid || !trialExpired;
+  const trialPercent = institute.created_at
+    ? Math.min(100, Math.round(((30 - trialLeft) / 30) * 100))
+    : 0;
 
-      {/* ── QR Modal ─────────────────────────────────────────────────────────── */}
+  // Nav items config
+  const coreNav: { id: Tab; label: string; emoji: string }[] = [
+    { id: 'leads', label: 'Leads', emoji: '📋' },
+    { id: 'profile', label: 'Institute Profile', emoji: '🏫' },
+    { id: 'blocklist', label: 'Blocklist', emoji: '🚫' },
+  ];
+  const premiumNav: { id: Tab; label: string; emoji: string }[] = [
+    { id: 'analytics', label: 'Analytics', emoji: '📊' },
+    { id: 'widget', label: 'Chat Widget', emoji: '💬' },
+    { id: 'training', label: 'AI Training', emoji: '🧠' },
+  ];
+
+  // Page title for topbar
+  const pageTitles: Record<Tab, string> = {
+    leads: 'Leads', analytics: 'Analytics', profile: 'Institute Profile',
+    blocklist: 'Blocklist', widget: 'Chat Widget', training: 'AI Training', premium: 'Premium Features',
+  };
+
+  return (
+    <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f8f7ff' }}>
+
+      {/* ─────────────────────── MODALS (unchanged) ──────────────────────────── */}
+
+      {/* QR Modal */}
       {showQRModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6 text-center">
@@ -513,7 +554,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* ── Add Lead Modal ───────────────────────────────────────────────────── */}
+      {/* Add Lead Modal */}
       {showAddLead && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
@@ -555,9 +596,7 @@ export default function Dashboard() {
             </div>
             <div className="flex gap-3 mt-5">
               <button onClick={() => setShowAddLead(false)}
-                className="flex-1 border border-gray-300 text-gray-600 text-sm font-medium py-2.5 rounded-xl hover:bg-gray-50">
-                Cancel
-              </button>
+                className="flex-1 border border-gray-300 text-gray-600 text-sm font-medium py-2.5 rounded-xl hover:bg-gray-50">Cancel</button>
               <button onClick={() => void handleAddLead()} disabled={addLoading}
                 className="flex-1 bg-indigo-600 text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50">
                 {addLoading ? 'Adding…' : 'Add Lead'}
@@ -566,6 +605,435 @@ export default function Dashboard() {
           </div>
         </div>
       )}
+
+      {/* Upgrade Modal */}
+      {showUpgradeModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+            <div className="flex items-center justify-between mb-5">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Upgrade Your Plan</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  Currently on <span className="font-semibold capitalize text-indigo-600">{institute.plan}</span> plan
+                </p>
+              </div>
+              <button onClick={() => { setShowUpgradeModal(false); setUpgradeError(null); setUpgradeSuccess(false); }}
+                className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            {upgradeSuccess ? (
+              <div className="py-10 flex flex-col items-center gap-3 text-center">
+                <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center text-3xl">📨</div>
+                <p className="text-gray-900 font-bold text-lg">Upgrade Request Sent!</p>
+                <p className="text-sm text-gray-500 max-w-xs">We've notified the InquiAI team. Your plan will be upgraded after review — usually within 24 hours.</p>
+              </div>
+            ) : (
+              <>
+                {pendingUpgrade && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
+                    <span className="text-lg mt-0.5">⏳</span>
+                    <div>
+                      <p className="text-sm font-semibold text-amber-800">Upgrade Request Pending</p>
+                      <p className="text-xs text-amber-700 mt-0.5">Your request to upgrade to <span className="font-bold capitalize">{pendingUpgrade.requested_plan}</span> is awaiting approval.</p>
+                    </div>
+                  </div>
+                )}
+                {upgradeError && (
+                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{upgradeError}</div>
+                )}
+                <div className="grid sm:grid-cols-2 gap-4">
+                  {/* Advanced */}
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'advanced' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Advanced</span>
+                      {institute.plan === 'advanced' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {pendingUpgrade?.requested_plan === 'advanced' && institute.plan !== 'advanced' && (
+                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
+                      )}
+                    </div>
+                    <div className="flex items-end gap-1.5 mb-1">
+                      <span className="text-2xl font-extrabold text-gray-900">₹1,499</span>
+                      <span className="text-xs text-gray-400 line-through mb-1">₹2,999</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <ul className="space-y-1.5 flex-1 mb-4">
+                      {['Unlimited leads', 'Analytics dashboard', 'Leads over time & peak hour charts', 'Conversion rate tracking', 'Embeddable chat widget', 'AI Training'].map(f => (
+                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
+                          <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button onClick={() => void handleRequestUpgrade('advanced')}
+                      disabled={upgrading || institute.plan === 'advanced' || institute.plan === 'pro' || !!pendingUpgrade}
+                      className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                      {upgrading ? 'Submitting…' : institute.plan === 'advanced' ? 'Current Plan' : institute.plan === 'pro' ? 'Already on Pro' : pendingUpgrade?.requested_plan === 'advanced' ? '⏳ Pending' : pendingUpgrade ? 'Another Request Pending' : 'Request Upgrade →'}
+                    </button>
+                  </div>
+                  {/* Pro */}
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}>
+                    <div className="flex items-center justify-between mb-1">
+                      <span className="text-xs font-bold text-purple-600 uppercase tracking-widest">Pro</span>
+                      {institute.plan === 'pro' && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {pendingUpgrade?.requested_plan === 'pro' && institute.plan !== 'pro' && (
+                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
+                      )}
+                    </div>
+                    <div className="flex items-end gap-1.5 mb-1">
+                      <span className="text-2xl font-extrabold text-gray-900">₹3,499</span>
+                      <span className="text-xs text-gray-400 line-through mb-1">₹4,599</span>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <ul className="space-y-1.5 flex-1 mb-4">
+                      {['Everything in Advanced', 'Multi-institute admin panel', 'Team accounts & roles', 'Custom AI prompt config', 'API access', 'Dedicated onboarding'].map(f => (
+                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
+                          <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
+                        </li>
+                      ))}
+                    </ul>
+                    <button onClick={() => void handleRequestUpgrade('pro')}
+                      disabled={upgrading || institute.plan === 'pro' || !!pendingUpgrade}
+                      className="w-full bg-purple-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors">
+                      {upgrading ? 'Submitting…' : institute.plan === 'pro' ? 'Current Plan' : pendingUpgrade?.requested_plan === 'pro' ? '⏳ Pending' : pendingUpgrade ? 'Another Request Pending' : 'Request Upgrade →'}
+                    </button>
+                  </div>
+                </div>
+                <p className="text-center text-xs text-gray-400 mt-4">📩 Reviewed by our team · Usually approved within 24 hours</p>
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ─────────────────────── SIDEBAR ─────────────────────────────────────── */}
+      <aside style={{
+        width: '220px', flexShrink: 0, background: '#13111e',
+        display: 'flex', flexDirection: 'column', overflow: 'hidden',
+      }}>
+        {/* Logo */}
+        <div style={{ padding: '20px 16px 20px', borderBottom: '1px solid #1e1c2e' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div style={{ width: '30px', height: '30px', background: '#7f77dd', borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', color: '#fff' }}>⚡</div>
+            <div>
+              <div style={{ fontSize: '15px', fontWeight: 500, color: '#fff' }}>InquiAI</div>
+              <div style={{ fontSize: '10px', color: '#55526e', marginTop: '1px' }}>Admission Assistant</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Core nav */}
+        <div style={{ padding: '14px 10px 0' }}>
+          <div style={{ fontSize: '9px', color: '#3e3c56', letterSpacing: '1.2px', padding: '0 8px', marginBottom: '5px' }}>CORE</div>
+          {coreNav.map(item => (
+            <button key={item.id} onClick={() => setActiveTab(item.id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px',
+                borderRadius: '7px', width: '100%', border: 'none', cursor: 'pointer',
+                marginBottom: '1px', textAlign: 'left',
+                background: activeTab === item.id ? '#1f1c30' : 'transparent',
+              }}>
+              <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: activeTab === item.id ? '#7f77dd' : '#3a3858', flexShrink: 0, display: 'inline-block' }} />
+              <span style={{ fontSize: '12px', color: activeTab === item.id ? '#d4d2e8' : '#6a677e' }}>{item.label}</span>
+              {item.id === 'leads' && leads.length > 0 && (
+                <span style={{ marginLeft: 'auto', background: '#2a2742', color: '#afa9ec', fontSize: '9px', padding: '2px 6px', borderRadius: '20px' }}>{leads.length}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Divider */}
+        <div style={{ margin: '12px 16px', height: '1px', background: '#1e1c2e' }} />
+
+        {/* Premium nav */}
+        <div style={{ padding: '0 10px' }}>
+          <div style={{ fontSize: '9px', color: '#3e3c56', letterSpacing: '1.2px', padding: '0 8px', marginBottom: '5px' }}>PREMIUM</div>
+          {premiumNav.map(item => {
+            const isActive = activeTab === item.id;
+            const locked = !premiumUnlocked;
+            return (
+              <button key={item.id} onClick={() => {
+                if (locked) { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }
+                else setActiveTab(item.id);
+              }}
+                style={{
+                  display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px',
+                  borderRadius: '7px', width: '100%', border: 'none', cursor: 'pointer',
+                  marginBottom: '1px', textAlign: 'left',
+                  background: isActive ? '#1f1c30' : 'transparent',
+                }}>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: locked ? '#3a3858' : isActive ? '#c9a55e' : '#8a6020', flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ fontSize: '12px', color: locked ? '#4a4768' : isActive ? '#d4b896' : '#c9a55e', flex: 1 }}>{item.label}</span>
+                {locked
+                  ? <span style={{ fontSize: '9px', background: '#1e1c2e', color: '#4a4870', padding: '2px 6px', borderRadius: '20px' }}>🔒</span>
+                  : <span style={{ fontSize: '9px', background: '#231c10', border: '1px solid #3a2e10', color: '#8a6020', padding: '2px 5px', borderRadius: '20px' }}>★ Adv</span>
+                }
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Upgrade card */}
+        {!isPaid && (
+          <div style={{ margin: '14px 10px 0', background: '#0e0d17', border: '1px solid #1e1c30', borderRadius: '10px', padding: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+              <span style={{ fontSize: '11px', fontWeight: 500, color: '#8884a0' }}>
+                {trialExpired ? 'Trial ended' : 'Free trial'}
+              </span>
+              <span style={{ fontSize: '10px', color: trialExpired ? '#a32d2d' : '#4a4768' }}>
+                {trialExpired ? 'Expired' : `${trialLeft}d left`}
+              </span>
+            </div>
+            <div style={{ height: '3px', background: '#1e1c2e', borderRadius: '2px', overflow: 'hidden', marginBottom: '8px' }}>
+              <div style={{ height: '100%', width: `${trialPercent}%`, background: trialExpired ? '#a32d2d' : '#534ab7', borderRadius: '2px' }} />
+            </div>
+            <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
+              {trialExpired
+                ? 'Premium features are locked. Upgrade to restore access.'
+                : 'Premium features are active. Upgrade before trial ends.'}
+            </p>
+            <button onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+              style={{ width: '100%', background: trialExpired ? '#4a2020' : '#1f1c30', border: `1px solid ${trialExpired ? '#6b2020' : '#2d2a42'}`, borderRadius: '6px', color: trialExpired ? '#f09595' : '#afa9ec', fontSize: '11px', fontWeight: 500, padding: '7px', cursor: 'pointer' }}>
+              {trialExpired ? '🔓 Unlock features →' : 'Upgrade plan →'}
+            </button>
+          </div>
+        )}
+        {isPaid && (
+          <div style={{ margin: '14px 10px 0', background: '#0a1a10', border: '1px solid #1a3020', borderRadius: '10px', padding: '10px 12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '12px' }}>✅</span>
+            <div>
+              <p style={{ fontSize: '11px', color: '#5dcaa5', fontWeight: 500 }}>All features unlocked</p>
+              <p style={{ fontSize: '9px', color: '#1d6040', marginTop: '1px', textTransform: 'capitalize' }}>{institute.plan} plan</p>
+            </div>
+          </div>
+        )}
+
+        {/* Footer */}
+        <div style={{ marginTop: 'auto', padding: '14px 16px', borderTop: '1px solid #1a1828' }}>
+          <div style={{ fontSize: '12px', color: '#8884a0', fontWeight: 500, marginBottom: '2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{institute.name}</div>
+          <div style={{ fontSize: '10px', color: '#3e3c56' }}>{institute.email}</div>
+        </div>
+      </aside>
+
+      {/* ─────────────────────── MAIN AREA ───────────────────────────────────── */}
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+
+        {/* Topbar */}
+        <header style={{ background: '#fff', borderBottom: '0.5px solid #e5e7eb', padding: '11px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+          <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>{pageTitles[activeTab]}</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {overdueCount > 0 && (
+              <button onClick={() => { setActiveTab('leads'); setFilter('all'); }}
+                style={{ fontSize: '11px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer' }}>
+                ⚠️ {overdueCount} overdue follow-up{overdueCount > 1 ? 's' : ''}
+              </button>
+            )}
+            {institute.whatsapp_connected ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '4px 10px' }}>
+                <span style={{ width: '6px', height: '6px', background: '#22c55e', borderRadius: '50%', display: 'inline-block' }} />
+                <span style={{ fontSize: '11px', color: '#15803d' }}>WhatsApp active · {institute.whatsapp_number}</span>
+                <button onClick={() => void handleDisconnect()}
+                  style={{ marginLeft: '6px', fontSize: '10px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Disconnect</button>
+              </div>
+            ) : (
+              <button onClick={() => void handleConnectWhatsApp()}
+                style={{ fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', cursor: 'pointer', fontWeight: 500 }}>
+                🔗 Connect WhatsApp
+              </button>
+            )}
+            <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#eeedfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 500, color: '#534ab7' }}>
+              {institute.name.slice(0, 2).toUpperCase()}
+            </div>
+          </div>
+        </header>
+
+        {/* Scrollable content */}
+        <main style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+
+          {/* Stats row — always visible */}
+          {activeTab === 'leads' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '10px', marginBottom: '20px' }}>
+              {[
+                { label: 'Total Leads', value: stats.total, color: '#7f77dd' },
+                { label: 'New', value: stats.new, color: '#1d9e75' },
+                { label: 'Contacted', value: stats.contacted, color: '#ef9f27' },
+                { label: 'Converted', value: stats.converted, color: '#639922' },
+              ].map(s => (
+                <div key={s.label} style={{ background: '#fff', border: '0.5px solid #e5e7eb', borderRadius: '10px', padding: '12px 14px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '5px' }}>
+                    <span style={{ width: '3px', height: '18px', background: s.color, borderRadius: '2px', display: 'inline-block' }} />
+                    <span style={{ fontSize: '10px', color: '#6b7280' }}>{s.label}</span>
+                  </div>
+                  <div style={{ fontSize: '24px', fontWeight: 500, color: '#111827' }}>{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* ── LEADS TAB ─────────────────────────────────────────────────────── */}
+          {activeTab === 'leads' && (
+            <>
+              <div className="flex items-center gap-2 mb-5 flex-wrap">
+                <span className="text-sm text-gray-500">Filter:</span>
+                {['all', 'new', 'contacted', 'converted', 'lost'].map(f => (
+                  <button key={f} onClick={() => setFilter(f)}
+                    className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors capitalize ${filter === f ? 'bg-indigo-600 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'}`}>
+                    {f}
+                  </button>
+                ))}
+                <button onClick={() => setShowAddLead(true)}
+                  className="ml-auto bg-indigo-600 text-white text-xs font-semibold px-4 py-1.5 rounded-full hover:bg-indigo-700 transition-colors">
+                  + Add Lead
+                </button>
+              </div>
+
+              {loading ? (
+                <div className="text-center py-20 text-gray-400">
+                  <div className="w-10 h-10 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-4" />
+                  <p>Loading leads…</p>
+                </div>
+              ) : filteredLeads.length === 0 ? (
+                <div className="text-center py-20">
+                  <span className="text-5xl block mb-4">📭</span>
+                  <h3 className="text-lg font-semibold text-gray-700 mb-2">No leads yet</h3>
+                  <p className="text-gray-500 text-sm">When students message {institute.whatsapp_number}, they'll appear here. Or add one manually.</p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {filteredLeads.map(lead => {
+                    const isExpanded = expandedLead === lead.id;
+                    const overdue = isOverdue(lead.follow_up_date) && lead.status !== 'converted' && lead.status !== 'lost';
+                    const followUpLabel = formatFollowUp(lead.follow_up_date);
+                    return (
+                      <div key={lead.id} className={`bg-white rounded-xl border transition-shadow ${overdue ? 'border-red-200' : 'border-gray-200'} ${isExpanded ? 'shadow-md' : 'hover:shadow-sm'}`}>
+                        <div className="p-4 flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                          <div className="flex-1 min-w-0 cursor-pointer" onClick={() => {
+                            const next = isExpanded ? null : lead.id;
+                            setExpandedLead(next);
+                            if (next !== null) void fetchConversation(lead);
+                          }}>
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <h3 className="font-semibold text-gray-900 text-sm">{lead.student_name ?? 'Unknown Student'}</h3>
+                              <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[lead.status] ?? 'bg-gray-100 text-gray-600'}`}>{lead.status}</span>
+                              {followUpLabel && (
+                                <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${overdue ? 'bg-red-100 text-red-600' : 'bg-purple-100 text-purple-700'}`}>📅 {followUpLabel}</span>
+                              )}
+                            </div>
+                            <p className="text-sm text-gray-600 mb-1 truncate">{lead.message || <span className="italic text-gray-400">No message</span>}</p>
+                            <div className="flex items-center gap-4 text-xs text-gray-400">
+                              <span>📱 {lead.student_phone}</span>
+                              <span>🕐 {new Date(lead.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                            </div>
+                            {lead.notes && !isExpanded && (<p className="text-xs text-gray-400 mt-1 italic truncate">📝 {lead.notes}</p>)}
+                          </div>
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <select value={lead.status} onChange={e => void updateStatus(lead.id, e.target.value)}
+                              className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 bg-white focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                              <option value="new">New</option>
+                              <option value="contacted">Contacted</option>
+                              <option value="converted">Converted</option>
+                              <option value="lost">Lost</option>
+                            </select>
+                            <button onClick={() => { const next = isExpanded ? null : lead.id; setExpandedLead(next); if (next !== null) void fetchConversation(lead); }}
+                              className="text-gray-400 hover:text-gray-600 text-lg leading-none px-1">{isExpanded ? '▲' : '▼'}</button>
+                          </div>
+                        </div>
+                        {isExpanded && (
+                          <div className="border-t border-gray-100 bg-gray-50 rounded-b-xl">
+                            <div className="flex border-b border-gray-200 px-4">
+                              {(['chat', 'notes', 'followup'] as const).map(tab => (
+                                <button key={tab} onClick={() => setDrawerTab(prev => ({ ...prev, [lead.id]: tab }))}
+                                  className={`px-3 py-2.5 text-xs font-medium border-b-2 -mb-px transition-colors ${getDrawerTab(lead.id) === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+                                  {tab === 'chat' ? '💬 Conversation' : tab === 'notes' ? '📝 Notes' : '📅 Follow-up'}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="p-4">
+                              {getDrawerTab(lead.id) === 'chat' && (
+                                <div>
+                                  {convLoading[lead.id] ? (
+                                    <div className="text-center py-8 text-gray-400 text-sm">Loading conversation…</div>
+                                  ) : !conversations[lead.id] || conversations[lead.id].length === 0 ? (
+                                    <div className="text-center py-8 text-gray-400 text-sm">No messages yet.</div>
+                                  ) : (
+                                    <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
+                                      {conversations[lead.id].map((msg, i) => (
+                                        <div key={i} className={`flex ${msg.role === 'user' ? 'justify-start' : 'justify-end'}`}>
+                                          <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${msg.role === 'user' ? 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm' : 'bg-indigo-600 text-white rounded-tr-sm'}`}>
+                                            <p className="whitespace-pre-wrap break-words">{msg.content}</p>
+                                            <p className={`text-xs mt-1 ${msg.role === 'user' ? 'text-gray-400' : 'text-indigo-200'}`}>
+                                              {new Date(msg.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                                            </p>
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  <button onClick={() => { setConversations(prev => { const n = {...prev}; delete n[lead.id]; return n; }); void fetchConversation(lead); }}
+                                    className="mt-2 text-xs text-indigo-500 hover:text-indigo-700 underline">Refresh</button>
+                                </div>
+                              )}
+                              {getDrawerTab(lead.id) === 'notes' && (
+                                <div>
+                                  <textarea defaultValue={lead.notes ?? ''} onChange={e => setEditingNotes(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                                    rows={4} placeholder="Add notes about this lead…"
+                                    className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-white" />
+                                  <button onClick={() => void saveNotes(lead)} disabled={savingNotes[lead.id]}
+                                    className="mt-2 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                                    {savingNotes[lead.id] ? 'Saving…' : 'Save Notes'}
+                                  </button>
+                                </div>
+                              )}
+                              {getDrawerTab(lead.id) === 'followup' && (
+                                <div className="grid sm:grid-cols-2 gap-4">
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">Set Follow-up Date</label>
+                                    <input type="date" defaultValue={lead.follow_up_date ? lead.follow_up_date.slice(0, 10) : ''}
+                                      onChange={e => setEditingFollowUp(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                                      className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white" />
+                                    {lead.follow_up_date && (
+                                      <p className={`text-xs mt-1 ${overdue ? 'text-red-500 font-medium' : 'text-gray-400'}`}>{overdue ? '⚠️ ' : ''}{followUpLabel}</p>
+                                    )}
+                                    <div className="flex gap-2 mt-2">
+                                      <button onClick={() => void saveFollowUp(lead)} disabled={savingFollowUp[lead.id]}
+                                        className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                                        {savingFollowUp[lead.id] ? 'Saving…' : 'Set Date'}
+                                      </button>
+                                      {lead.follow_up_date && (
+                                        <button onClick={() => {
+                                          setEditingFollowUp(prev => ({ ...prev, [lead.id]: '' }));
+                                          void (async () => {
+                                            await fetch(apiUrl(`/api/leads/${lead.id}/followup`), { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ follow_up_date: null }) });
+                                            setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, follow_up_date: null } : l));
+                                          })();
+                                        }} className="text-xs border border-gray-300 text-gray-500 px-3 py-1.5 rounded-lg hover:bg-gray-100">Clear</button>
+                                      )}
+                                    </div>
+                                  </div>
+                                  <div>
+                                    <label className="block text-xs font-medium text-gray-700 mb-1">💬 Send AI Follow-up on WhatsApp</label>
+                                    <p className="text-xs text-gray-400 mb-2">AI generates a personalised message and sends it instantly.</p>
+                                    <button onClick={() => void sendFollowUp(lead)}
+                                      disabled={sendingFollowUp[lead.id] || !institute?.whatsapp_connected}
+                                      className="text-xs bg-green-600 text-white px-3 py-1.5 rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center gap-1.5">
+                                      {sendingFollowUp[lead.id] ? <><span className="animate-spin inline-block">⏳</span> Sending…</> : <>📲 Send Follow-up</>}
+                                    </button>
+                                    {!institute?.whatsapp_connected && (<p className="text-xs text-amber-600 mt-1">Connect WhatsApp first.</p>)}
+                                    {followUpResult[lead.id]?.msg && (
+                                      <div className={`mt-2 text-xs rounded-lg px-3 py-2 ${followUpResult[lead.id].ok ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
+                                        {followUpResult[lead.id].ok ? <><span className="font-medium">Sent!</span> "{followUpResult[lead.id].msg.slice(0, 100)}{followUpResult[lead.id].msg.length > 100 ? '…' : ''}"</> : followUpResult[lead.id].msg}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </>
+          )}
 
       {/* ── Upgrade Modal ───────────────────────────────────────────────────── */}
       {showUpgradeModal && (
@@ -686,105 +1154,6 @@ export default function Dashboard() {
           </div>
         </div>
       )}
-
-      {/* ── Header ───────────────────────────────────────────────────────────── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">{institute.name}</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            {institute.email} · {institute.whatsapp_number}
-            {institute.website && <> · <a href={institute.website} target="_blank" rel="noopener noreferrer" className="text-indigo-500 hover:underline">{institute.website}</a></>}
-            {' '}· <span className="bg-indigo-100 text-indigo-700 text-xs font-semibold px-2 py-0.5 rounded-full uppercase">{institute.plan}</span>
-            {pendingUpgrade && (
-              <span className="ml-1.5 bg-amber-100 text-amber-700 text-xs font-semibold px-2 py-0.5 rounded-full">
-                ⏳ {pendingUpgrade.requested_plan.charAt(0).toUpperCase() + pendingUpgrade.requested_plan.slice(1)} upgrade pending
-              </span>
-            )}
-          </p>
-        </div>
-        <div className="flex items-center gap-2 flex-shrink-0">
-          {institute.whatsapp_connected && (
-            <button onClick={() => void handleDisconnect()}
-              className="text-xs border border-red-200 text-red-500 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
-              📵 Disconnect WhatsApp
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* ── WhatsApp Banner ──────────────────────────────────────────────────── */}
-      {!institute.whatsapp_connected ? (
-        <div className="bg-amber-50 border border-amber-200 rounded-xl p-4 mb-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-          <div>
-            <p className="font-semibold text-amber-800 text-sm">📱 Connect your WhatsApp number</p>
-            <p className="text-amber-700 text-xs mt-1">Scan a QR code. Students will receive AI replies automatically.</p>
-          </div>
-          <button onClick={() => void handleConnectWhatsApp()}
-            className="flex-shrink-0 bg-green-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-green-700">
-            🔗 Connect WhatsApp
-          </button>
-        </div>
-      ) : (
-        <div className="bg-green-50 border border-green-200 rounded-xl p-4 mb-6 flex items-center gap-3">
-          <span className="text-xl">✅</span>
-          <div>
-            <p className="font-semibold text-green-800 text-sm">WhatsApp Connected</p>
-            <p className="text-green-700 text-xs mt-0.5">AI replies are active on {institute.whatsapp_number}.</p>
-          </div>
-        </div>
-      )}
-
-      {/* ── Overdue banner ───────────────────────────────────────────────────── */}
-      {overdueCount > 0 && (
-        <div className="bg-red-50 border border-red-200 rounded-xl p-3 mb-6 flex items-center gap-3">
-          <span className="text-lg">⚠️</span>
-          <p className="text-sm text-red-700 font-medium">
-            {overdueCount} follow-up{overdueCount > 1 ? 's are' : ' is'} overdue.
-          </p>
-          <button onClick={() => { setActiveTab('leads'); setFilter('all'); }}
-            className="ml-auto text-xs text-red-600 underline hover:text-red-800">View leads</button>
-        </div>
-      )}
-
-      {/* ── Stats ────────────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-6">
-        {[
-          { label: 'Total Leads', value: stats.total, color: 'bg-gray-50' },
-          { label: 'New', value: stats.new, color: 'bg-blue-50' },
-          { label: 'Contacted', value: stats.contacted, color: 'bg-yellow-50' },
-          { label: 'Converted', value: stats.converted, color: 'bg-green-50' },
-        ].map(s => (
-          <div key={s.label} className={`${s.color} rounded-xl p-4 text-center border border-gray-200`}>
-            <p className="text-2xl font-bold text-gray-900">{s.value}</p>
-            <p className="text-xs text-gray-500 mt-1">{s.label}</p>
-          </div>
-        ))}
-      </div>
-
-      {/* ── Tabs ─────────────────────────────────────────────────────────────── */}
-      <div className="flex gap-1 mb-6 border-b border-gray-200 overflow-x-auto">
-        {(['leads', 'analytics', 'widget', 'profile', 'training', 'blocklist'] as Tab[]).map(tab => (
-          <button key={tab} onClick={() => setActiveTab(tab)}
-            className={`px-4 py-2 text-sm font-medium transition-colors border-b-2 -mb-px whitespace-nowrap ${activeTab === tab ? 'border-indigo-600 text-indigo-600' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
-            {tab === 'leads' ? '📋 Leads'
-              : tab === 'analytics' ? '📊 Analytics'
-              : tab === 'widget' ? '💬 Chat Widget'
-              : tab === 'profile' ? '🏫 Institute Profile'
-              : tab === 'training' ? '🧠 AI Training'
-              : '🚫 Blocklist'}
-          </button>
-        ))}
-        {/* Premium tab — special gradient styling to make it stand out */}
-        <button
-          onClick={() => setActiveTab('premium')}
-          className={`px-4 py-2 text-sm font-bold transition-all border-b-2 -mb-px whitespace-nowrap ${
-            activeTab === 'premium'
-              ? 'border-amber-500 text-amber-600'
-              : 'border-transparent bg-gradient-to-r from-amber-500 to-orange-500 bg-clip-text text-transparent hover:opacity-80'
-          }`}>
-          ⭐ Premium Features
-        </button>
-      </div>
 
       {/* ── Leads Tab ────────────────────────────────────────────────────────── */}
       {activeTab === 'leads' && (
@@ -1478,35 +1847,32 @@ export default function Dashboard() {
           )}
         </div>
       )}
-      {/* ── Training Tab ─────────────────────────────────────────────────────── */}
+
+      {/* ── Training Tab ──────────────────────────────────────────────────────── */}
       {activeTab === 'training' && institute && (
-        <div className="p-6">
-          <TrainingSection instituteId={institute.id} />
-        </div>
+        <TrainingSection instituteId={institute.id} />
       )}
 
-      {/* ── Premium Tab ──────────────────────────────────────────────────────── */}
+      {/* ── Premium Tab ───────────────────────────────────────────────────────── */}
       {activeTab === 'premium' && institute && (
-        <div className="p-6">
-          <div className="flex items-center gap-3 mb-6">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white text-xl shadow-md">
-              ⭐
-            </div>
+        <div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '20px' }}>
+            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #f59e0b, #d97706)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>⭐</div>
             <div>
-              <h2 className="text-xl font-bold text-gray-900">Premium Features</h2>
-              <p className="text-sm text-gray-500 mt-0.5">
-                Everything InquiAI offers — unlock the full power of AI-driven admissions.
-              </p>
+              <h2 className="text-base font-semibold text-gray-900">Premium Features</h2>
+              <p className="text-xs text-gray-500 mt-0.5">Everything InquiAI offers — unlock the full power of AI-driven admissions.</p>
             </div>
           </div>
           <PremiumSection
             plan={institute.plan}
-            createdAt={institute.created_at}
+            createdAt={institute.created_at ?? new Date().toISOString()}
             onUpgradeClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
           />
         </div>
       )}
 
+        </main>
+      </div>
     </div>
   );
 }
