@@ -503,7 +503,7 @@ export default function Dashboard() {
 
   if (!institute) return null;
 
-  const isPaid = premiumUnlocked;
+  const isPaid = isPremium(institute.plan);
   const trialLeft = institute.created_at ? getTrialDaysLeft(institute.created_at) : 30;
   const trialExpired = institute.created_at ? isTrialExpired(institute.created_at) : false;
   // Premium features accessible during trial OR on paid plan
