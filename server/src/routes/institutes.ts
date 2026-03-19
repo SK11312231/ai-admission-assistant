@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import qrcode from 'qrcode';
 import pool from '../db';
 import { initSession, getSessionState, disconnectSession } from './whatsappManager';
-import { scrapeAndEnrich, getInstituteDetails } from './instituteEnrichment';
+import { scrapeAndEnrich, getInstituteDetails, scoreProfileCompleteness } from './instituteEnrichment';
 
 const router = Router();
 
@@ -422,6 +422,24 @@ router.delete('/:id/disconnect-whatsapp', async (req: Request, res: Response) =>
   } catch (err) {
     console.error('Disconnect WhatsApp error:', err);
     res.status(500).json({ error: 'Failed to disconnect WhatsApp.' });
+  }
+});
+
+// GET /api/institutes/:id/profile-completeness
+// Returns a completeness score for the institute's AI knowledge base.
+router.get('/:id/profile-completeness', async (req: Request, res: Response) => {
+  const instituteId = Number(req.params.id);
+  if (!instituteId) {
+    res.status(400).json({ error: 'Invalid ID.' });
+    return;
+  }
+  try {
+    const data = await getInstituteDetails(instituteId);
+    const result = scoreProfileCompleteness(data);
+    res.json(result);
+  } catch (err) {
+    console.error('[Completeness] Failed:', err);
+    res.status(500).json({ error: 'Failed to check profile completeness.' });
   }
 });
 

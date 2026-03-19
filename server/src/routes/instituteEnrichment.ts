@@ -307,6 +307,73 @@ export async function scrapeAndEnrich(
   }
 }
 
+// ── Profile completeness scorer ───────────────────────────────────────────────
+
+export interface ProfileCompleteness {
+  complete: boolean;
+  score: number; // 0–100
+  missing: string[];
+  present: string[];
+}
+
+export function scoreProfileCompleteness(data: string | null): ProfileCompleteness {
+  if (!data || data.trim().length < 50) {
+    return {
+      complete: false,
+      score: 0,
+      missing: ['Courses & Programs', 'Fee Structure', 'Admission Process', 'Contact Details', 'About / Overview'],
+      present: [],
+    };
+  }
+
+  const checks: { label: string; patterns: RegExp[] }[] = [
+    {
+      label: 'Courses & Programs',
+      patterns: [/course|program|batch|subject|syllabus|curriculum/i],
+    },
+    {
+      label: 'Fee Structure',
+      patterns: [/fee|fees|price|cost|₹|rs\.|rupee|tuition|payment/i],
+    },
+    {
+      label: 'Admission Process',
+      patterns: [/admission|enroll|apply|eligib|criteria|qualification|entrance/i],
+    },
+    {
+      label: 'Contact Details',
+      patterns: [/contact|phone|mobile|call|email|address|location|whatsapp/i],
+    },
+    {
+      label: 'About / Overview',
+      patterns: [/about|overview|founded|established|since|institute|academy|school|college/i],
+    },
+    {
+      label: 'Batch Timings / Schedule',
+      patterns: [/timing|schedule|batch|morning|evening|weekend|duration|hours/i],
+    },
+    {
+      label: 'Faculty Details',
+      patterns: [/faculty|teacher|trainer|instructor|staff|professor|expert/i],
+    },
+  ];
+
+  const present: string[] = [];
+  const missing: string[] = [];
+
+  for (const check of checks) {
+    const found = check.patterns.some(p => p.test(data));
+    if (found) present.push(check.label);
+    else missing.push(check.label);
+  }
+
+  const score = Math.round((present.length / checks.length) * 100);
+  const complete = missing.filter(m =>
+    ['Courses & Programs', 'Fee Structure', 'Contact Details'].includes(m)
+  ).length === 0;
+
+  return { complete, score, missing, present };
+}
+
 // ── Fetch stored details for AI prompt ───────────────────────────────────────
 
 export async function getInstituteDetails(instituteId: number): Promise<string | null> {
