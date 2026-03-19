@@ -4,7 +4,7 @@ nixPkgs = [
   "nss",
   "freetype",
   "harfbuzz",
-  "ca-certificates",
+  "cacert",
   "glib",
   "dbus",
   "xorg.libX11",
@@ -29,4 +29,4 @@ nixPkgs = [
 
 [variables]
 PUPPETEER_SKIP_CHROMIUM_DOWNLOAD = "true"
-PUPPETEER_EXECUTABLE_PATH = "/run/current-system/sw/bin/chromium"
+PUPPETEER_EXECUTABLE_PATH = "/root/.nix-profile/bin/chromium"
