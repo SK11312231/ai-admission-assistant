@@ -1,0 +1,452 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy — InquiAI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --indigo: #6366f1;
+      --violet: #8b5cf6;
+      --bg: #0a0a12;
+      --surface: #12121e;
+      --surface2: #1a1a2e;
+      --border: rgba(99,102,241,0.15);
+      --text: #e2e2f0;
+      --muted: #8888aa;
+      --accent: #a78bfa;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Sora', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      font-size: 15px;
+    }
+
+    /* Grain overlay */
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0;
+      opacity: 0.4;
+    }
+
+    /* Header */
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,10,18,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+    }
+
+    .header-inner {
+      max-width: 900px;
+      margin: 0 auto;
+      height: 64px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--indigo), var(--violet));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+
+    .logo-text {
+      font-size: 1.2rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, var(--indigo), var(--accent));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .back-link {
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 20px;
+      transition: all 0.2s;
+    }
+    .back-link:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* Hero */
+    .hero {
+      position: relative;
+      padding: 72px 2rem 48px;
+      text-align: center;
+    }
+
+    .hero::after {
+      content: '';
+      position: absolute;
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 300px;
+      background: radial-gradient(ellipse at center, rgba(99,102,241,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(99,102,241,0.1);
+      border: 1px solid rgba(99,102,241,0.25);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 14px;
+      border-radius: 20px;
+      margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3rem);
+      font-weight: 700;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 12px;
+    }
+
+    .hero-meta {
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    /* Layout */
+    .layout {
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 0 2rem 80px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 40px;
+      align-items: start;
+    }
+
+    /* TOC */
+    .toc {
+      position: sticky;
+      top: 88px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+    }
+
+    .toc-title {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin-bottom: 14px;
+    }
+
+    .toc a {
+      display: block;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      padding: 5px 0;
+      border-left: 2px solid transparent;
+      padding-left: 10px;
+      transition: all 0.2s;
+    }
+    .toc a:hover { color: var(--accent); border-color: var(--accent); }
+
+    /* Content */
+    .content section {
+      margin-bottom: 48px;
+    }
+
+    .content h2 {
+      font-size: 1.2rem;
+      font-weight: 600;
+      color: #fff;
+      margin-bottom: 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .section-num {
+      display: inline-flex;
+      align-items: center; justify-content: center;
+      width: 26px; height: 26px;
+      background: linear-gradient(135deg, var(--indigo), var(--violet));
+      border-radius: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .content p { color: var(--text); margin-bottom: 12px; }
+
+    .content ul {
+      list-style: none;
+      padding: 0;
+      margin-bottom: 12px;
+    }
+
+    .content ul li {
+      position: relative;
+      padding-left: 18px;
+      color: var(--text);
+      margin-bottom: 8px;
+    }
+
+    .content ul li::before {
+      content: '▸';
+      position: absolute; left: 0;
+      color: var(--accent);
+      font-size: 11px;
+      top: 2px;
+    }
+
+    .highlight-box {
+      background: rgba(99,102,241,0.06);
+      border: 1px solid rgba(99,102,241,0.2);
+      border-radius: 10px;
+      padding: 18px 20px;
+      margin: 16px 0;
+    }
+
+    .highlight-box p { margin-bottom: 0; }
+
+    /* Contact card */
+    .contact-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px;
+    }
+
+    .contact-card p { margin-bottom: 6px; }
+    .contact-card a { color: var(--accent); text-decoration: none; }
+    .contact-card a:hover { text-decoration: underline; }
+
+    /* Footer */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 28px 2rem;
+      text-align: center;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    footer a { color: var(--accent); text-decoration: none; }
+
+    /* Responsive */
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <div class="logo-icon">🎓</div>
+        <span class="logo-text">InquiAI</span>
+      </a>
+      <a href="/" class="back-link">← Back to Home</a>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="badge">📄 Legal Document</div>
+    <h1>Privacy Policy</h1>
+    <p class="hero-meta">Effective Date: March 19, 2025 &nbsp;·&nbsp; Last Updated: March 19, 2025</p>
+  </div>
+
+  <div class="layout">
+
+    <!-- TOC -->
+    <nav class="toc">
+      <div class="toc-title">Contents</div>
+      <a href="#intro">Introduction</a>
+      <a href="#information">Information We Collect</a>
+      <a href="#usage">How We Use Your Data</a>
+      <a href="#whatsapp">WhatsApp & Meta</a>
+      <a href="#sharing">Data Sharing</a>
+      <a href="#retention">Data Retention</a>
+      <a href="#security">Security</a>
+      <a href="#rights">Your Rights</a>
+      <a href="#cookies">Cookies</a>
+      <a href="#children">Children's Privacy</a>
+      <a href="#changes">Policy Changes</a>
+      <a href="#contact">Contact Us</a>
+    </nav>
+
+    <!-- Content -->
+    <main class="content">
+
+      <section id="intro">
+        <h2><span class="section-num">1</span> Introduction</h2>
+        <p>Welcome to InquiAI ("we", "our", or "us"), an AI-powered WhatsApp admission assistant built for coaching institutes and educational businesses in India. InquiAI is operated by its founders and is accessible at <strong>inquiai.in</strong>.</p>
+        <p>This Privacy Policy explains how we collect, use, store, and protect your personal information when you use our platform, and your rights regarding that data.</p>
+        <div class="highlight-box">
+          <p>By using InquiAI, you agree to the collection and use of information as described in this policy. If you do not agree, please discontinue use of our services.</p>
+        </div>
+      </section>
+
+      <section id="information">
+        <h2><span class="section-num">2</span> Information We Collect</h2>
+        <p><strong>Account & Business Information</strong></p>
+        <ul>
+          <li>Name, email address, and password when you register</li>
+          <li>Coaching institute name, website URL, and business description</li>
+          <li>WhatsApp Business Account (WABA) ID and phone number details</li>
+          <li>Billing and subscription information (processed via third-party payment providers)</li>
+        </ul>
+        <p><strong>Lead & Conversation Data</strong></p>
+        <ul>
+          <li>Names, phone numbers, and messages of prospective students who contact your institute via WhatsApp</li>
+          <li>Conversation history between your WhatsApp bot and leads</li>
+          <li>Lead status, tags, follow-up notes, and custom fields you create</li>
+        </ul>
+        <p><strong>Usage Data</strong></p>
+        <ul>
+          <li>Pages visited, features used, and interactions within the InquiAI dashboard</li>
+          <li>Device type, browser, IP address, and approximate location</li>
+          <li>Error logs and performance diagnostics</li>
+        </ul>
+        <p><strong>AI Training Data (Optional)</strong></p>
+        <ul>
+          <li>WhatsApp chat exports you voluntarily upload to train your AI assistant</li>
+          <li>Custom Q&A pairs and knowledge base content you provide</li>
+        </ul>
+      </section>
+
+      <section id="usage">
+        <h2><span class="section-num">3</span> How We Use Your Data</h2>
+        <ul>
+          <li>To operate, maintain, and improve the InquiAI platform</li>
+          <li>To power the AI assistant that responds to your leads on WhatsApp</li>
+          <li>To personalise your dashboard and analytics</li>
+          <li>To send service-related emails (onboarding, billing, feature updates)</li>
+          <li>To detect spam, abuse, and fraudulent activity</li>
+          <li>To comply with legal obligations</li>
+          <li>To provide customer support</li>
+        </ul>
+        <div class="highlight-box">
+          <p>We do <strong>not</strong> sell your data or your leads' data to third parties. We do not use your leads' data to train any general-purpose AI models.</p>
+        </div>
+      </section>
+
+      <section id="whatsapp">
+        <h2><span class="section-num">4</span> WhatsApp & Meta Integration</h2>
+        <p>InquiAI integrates with the <strong>WhatsApp Business API</strong> provided by Meta Platforms, Inc. By connecting your WhatsApp Business Account, you acknowledge that:</p>
+        <ul>
+          <li>Message data flows through Meta's infrastructure as per <a href="https://www.whatsapp.com/legal/privacy-policy" target="_blank" style="color:var(--accent)">WhatsApp's Privacy Policy</a></li>
+          <li>You are responsible for obtaining consent from leads before messaging them on WhatsApp</li>
+          <li>You must comply with <a href="https://www.whatsapp.com/legal/commerce-policy" target="_blank" style="color:var(--accent)">WhatsApp Commerce Policy</a> and Meta's terms</li>
+          <li>InquiAI acts as a data processor; you (the institute) remain the data controller for your leads' data</li>
+        </ul>
+      </section>
+
+      <section id="sharing">
+        <h2><span class="section-num">5</span> Data Sharing</h2>
+        <p>We share data only in the following limited circumstances:</p>
+        <ul>
+          <li><strong>Service Providers:</strong> Infrastructure (Railway, PostgreSQL), AI APIs (Groq/Llama), email services — all bound by confidentiality agreements</li>
+          <li><strong>Meta/WhatsApp:</strong> As required to operate the WhatsApp Business API</li>
+          <li><strong>Legal Compliance:</strong> When required by Indian law, court order, or government authority</li>
+          <li><strong>Business Transfer:</strong> In the event of a merger or acquisition, with prior notice to users</li>
+        </ul>
+      </section>
+
+      <section id="retention">
+        <h2><span class="section-num">6</span> Data Retention</h2>
+        <ul>
+          <li>Account data is retained for the duration of your subscription plus 30 days after account deletion</li>
+          <li>Lead and conversation data is retained as long as your account is active</li>
+          <li>Upon account deletion request, all personal data is permanently deleted within 30 days</li>
+          <li>Anonymised, aggregated analytics may be retained indefinitely</li>
+        </ul>
+      </section>
+
+      <section id="security">
+        <h2><span class="section-num">7</span> Security</h2>
+        <p>We implement industry-standard security measures including:</p>
+        <ul>
+          <li>Encrypted data transmission via HTTPS/TLS</li>
+          <li>Hashed and salted password storage</li>
+          <li>Environment-based secret management (no hardcoded credentials)</li>
+          <li>Role-based access control within the platform</li>
+          <li>Regular security reviews</li>
+        </ul>
+        <p>However, no system is 100% secure. In the event of a data breach affecting your data, we will notify you within 72 hours as required.</p>
+      </section>
+
+      <section id="rights">
+        <h2><span class="section-num">8</span> Your Rights</h2>
+        <p>As a user of InquiAI, you have the right to:</p>
+        <ul>
+          <li><strong>Access</strong> the personal data we hold about you</li>
+          <li><strong>Correct</strong> inaccurate or incomplete data</li>
+          <li><strong>Delete</strong> your account and associated data</li>
+          <li><strong>Export</strong> your leads and conversation data in CSV format</li>
+          <li><strong>Withdraw consent</strong> for optional data processing at any time</li>
+          <li><strong>Opt out</strong> of marketing communications</li>
+        </ul>
+        <p>To exercise any of these rights, email us at <a href="mailto:privacy@inquiai.in" style="color:var(--accent)">privacy@inquiai.in</a>. We will respond within 15 business days.</p>
+      </section>
+
+      <section id="cookies">
+        <h2><span class="section-num">9</span> Cookies & Tracking</h2>
+        <p>We use essential cookies to maintain your session and preferences. We may use analytics tools to understand usage patterns. You can disable cookies in your browser settings, though some features may not function correctly.</p>
+      </section>
+
+      <section id="children">
+        <h2><span class="section-num">10</span> Children's Privacy</h2>
+        <p>InquiAI is a B2B platform intended for use by coaching institutes and educational businesses. It is not directed at individuals under 18 years of age. We do not knowingly collect personal data from minors.</p>
+      </section>
+
+      <section id="changes">
+        <h2><span class="section-num">11</span> Changes to This Policy</h2>
+        <p>We may update this Privacy Policy periodically. When we do, we will update the "Last Updated" date at the top and notify registered users via email if changes are material. Your continued use of InquiAI after changes constitutes acceptance of the updated policy.</p>
+      </section>
+
+      <section id="contact">
+        <h2><span class="section-num">12</span> Contact Us</h2>
+        <div class="contact-card">
+          <p><strong>InquiAI</strong></p>
+          <p>For privacy-related queries:</p>
+          <p>📧 <a href="mailto:privacy@inquiai.in">privacy@inquiai.in</a></p>
+          <p>🌐 <a href="https://inquiai.in">inquiai.in</a></p>
+          <p style="margin-top:12px; color:var(--muted); font-size:13px;">We aim to respond to all privacy requests within 15 business days.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>
+    <p>© 2025 InquiAI. All rights reserved. &nbsp;·&nbsp; <a href="/privacy-policy.html">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms-of-service.html">Terms of Service</a> &nbsp;·&nbsp; <a href="/">Home</a></p>
+  </footer>
+
+</body>
+</html>

@@ -1,0 +1,374 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Terms of Service — InquiAI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --indigo: #6366f1;
+      --violet: #8b5cf6;
+      --bg: #0a0a12;
+      --surface: #12121e;
+      --surface2: #1a1a2e;
+      --border: rgba(99,102,241,0.15);
+      --text: #e2e2f0;
+      --muted: #8888aa;
+      --accent: #a78bfa;
+      --warn: #f59e0b;
+    }
+
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      font-family: 'Sora', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.75;
+      font-size: 15px;
+    }
+
+    body::before {
+      content: '';
+      position: fixed; inset: 0;
+      background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.04'/%3E%3C/svg%3E");
+      pointer-events: none; z-index: 0; opacity: 0.4;
+    }
+
+    header {
+      position: sticky; top: 0; z-index: 100;
+      background: rgba(10,10,18,0.85);
+      backdrop-filter: blur(20px);
+      border-bottom: 1px solid var(--border);
+      padding: 0 2rem;
+    }
+
+    .header-inner {
+      max-width: 900px; margin: 0 auto;
+      height: 64px; display: flex;
+      align-items: center; justify-content: space-between;
+    }
+
+    .logo {
+      display: flex; align-items: center; gap: 10px;
+      text-decoration: none;
+    }
+    .logo-icon {
+      width: 34px; height: 34px;
+      background: linear-gradient(135deg, var(--indigo), var(--violet));
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 16px;
+    }
+    .logo-text {
+      font-size: 1.2rem; font-weight: 700;
+      background: linear-gradient(90deg, var(--indigo), var(--accent));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    }
+    .back-link {
+      font-size: 13px; color: var(--muted); text-decoration: none;
+      border: 1px solid var(--border); padding: 6px 14px;
+      border-radius: 20px; transition: all 0.2s;
+    }
+    .back-link:hover { color: var(--accent); border-color: var(--accent); }
+
+    .hero {
+      position: relative; padding: 72px 2rem 48px; text-align: center;
+    }
+    .hero::after {
+      content: ''; position: absolute;
+      top: 0; left: 50%; transform: translateX(-50%);
+      width: 600px; height: 300px;
+      background: radial-gradient(ellipse at center, rgba(139,92,246,0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: rgba(139,92,246,0.1);
+      border: 1px solid rgba(139,92,246,0.25);
+      color: var(--accent); font-size: 12px; font-weight: 500;
+      padding: 5px 14px; border-radius: 20px; margin-bottom: 20px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2rem, 5vw, 3rem); font-weight: 700;
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+      margin-bottom: 12px;
+    }
+    .hero-meta { color: var(--muted); font-size: 13px; }
+
+    .layout {
+      max-width: 900px; margin: 0 auto;
+      padding: 0 2rem 80px;
+      display: grid;
+      grid-template-columns: 220px 1fr;
+      gap: 40px; align-items: start;
+    }
+
+    .toc {
+      position: sticky; top: 88px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px; padding: 20px;
+    }
+    .toc-title {
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--muted); margin-bottom: 14px;
+    }
+    .toc a {
+      display: block; font-size: 13px; color: var(--muted);
+      text-decoration: none; padding: 5px 0 5px 10px;
+      border-left: 2px solid transparent; transition: all 0.2s;
+    }
+    .toc a:hover { color: var(--accent); border-color: var(--accent); }
+
+    .content section { margin-bottom: 48px; }
+
+    .content h2 {
+      font-size: 1.2rem; font-weight: 600; color: #fff;
+      margin-bottom: 16px; padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 10px;
+    }
+
+    .section-num {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 26px; height: 26px;
+      background: linear-gradient(135deg, var(--indigo), var(--violet));
+      border-radius: 6px; font-size: 11px; font-weight: 700;
+      color: #fff; flex-shrink: 0;
+    }
+
+    .content p { color: var(--text); margin-bottom: 12px; }
+
+    .content ul {
+      list-style: none; padding: 0; margin-bottom: 12px;
+    }
+    .content ul li {
+      position: relative; padding-left: 18px;
+      color: var(--text); margin-bottom: 8px;
+    }
+    .content ul li::before {
+      content: '▸'; position: absolute; left: 0;
+      color: var(--accent); font-size: 11px; top: 2px;
+    }
+
+    .highlight-box {
+      background: rgba(99,102,241,0.06);
+      border: 1px solid rgba(99,102,241,0.2);
+      border-radius: 10px; padding: 18px 20px; margin: 16px 0;
+    }
+    .highlight-box p { margin-bottom: 0; }
+
+    .warn-box {
+      background: rgba(245,158,11,0.06);
+      border: 1px solid rgba(245,158,11,0.2);
+      border-radius: 10px; padding: 18px 20px; margin: 16px 0;
+    }
+    .warn-box p { margin-bottom: 0; color: #fcd34d; }
+
+    .contact-card {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px;
+    }
+    .contact-card p { margin-bottom: 6px; }
+    .contact-card a { color: var(--accent); text-decoration: none; }
+    .contact-card a:hover { text-decoration: underline; }
+
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 28px 2rem; text-align: center;
+      color: var(--muted); font-size: 13px;
+    }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    @media (max-width: 700px) {
+      .layout { grid-template-columns: 1fr; }
+      .toc { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="header-inner">
+      <a href="/" class="logo">
+        <div class="logo-icon">🎓</div>
+        <span class="logo-text">InquiAI</span>
+      </a>
+      <a href="/" class="back-link">← Back to Home</a>
+    </div>
+  </header>
+
+  <div class="hero">
+    <div class="badge">📋 Legal Document</div>
+    <h1>Terms of Service</h1>
+    <p class="hero-meta">Effective Date: March 19, 2025 &nbsp;·&nbsp; Last Updated: March 19, 2025</p>
+  </div>
+
+  <div class="layout">
+
+    <nav class="toc">
+      <div class="toc-title">Contents</div>
+      <a href="#acceptance">Acceptance of Terms</a>
+      <a href="#service">The Service</a>
+      <a href="#accounts">Accounts & Access</a>
+      <a href="#acceptable">Acceptable Use</a>
+      <a href="#whatsapp">WhatsApp Compliance</a>
+      <a href="#subscription">Subscription & Billing</a>
+      <a href="#data">Data Ownership</a>
+      <a href="#ip">Intellectual Property</a>
+      <a href="#liability">Limitation of Liability</a>
+      <a href="#termination">Termination</a>
+      <a href="#disputes">Disputes & Governing Law</a>
+      <a href="#changes">Changes to Terms</a>
+      <a href="#contact">Contact</a>
+    </nav>
+
+    <main class="content">
+
+      <section id="acceptance">
+        <h2><span class="section-num">1</span> Acceptance of Terms</h2>
+        <p>These Terms of Service ("Terms") govern your access to and use of InquiAI ("Platform"), operated at <strong>inquiai.in</strong>. By registering an account or using any part of the Platform, you ("User", "you", or "your") agree to be bound by these Terms.</p>
+        <div class="warn-box">
+          <p>⚠️ If you are using InquiAI on behalf of a coaching institute or business, you represent that you have the authority to bind that organisation to these Terms.</p>
+        </div>
+      </section>
+
+      <section id="service">
+        <h2><span class="section-num">2</span> The Service</h2>
+        <p>InquiAI provides an AI-powered WhatsApp admission assistant platform that allows coaching institutes to:</p>
+        <ul>
+          <li>Automate responses to prospective student inquiries on WhatsApp</li>
+          <li>Manage and track leads through a centralised dashboard</li>
+          <li>Configure AI knowledge bases via chat exports and Q&A pairs</li>
+          <li>Access analytics and conversation history</li>
+        </ul>
+        <p>We reserve the right to modify, suspend, or discontinue any part of the service with reasonable notice.</p>
+      </section>
+
+      <section id="accounts">
+        <h2><span class="section-num">3</span> Accounts & Access</h2>
+        <ul>
+          <li>You must provide accurate and complete registration information</li>
+          <li>You are responsible for maintaining the confidentiality of your login credentials</li>
+          <li>Each account is for a single business entity; account sharing across organisations is not permitted</li>
+          <li>You must notify us immediately of any unauthorised access to your account</li>
+          <li>We may suspend accounts showing signs of fraud, abuse, or Terms violations</li>
+        </ul>
+      </section>
+
+      <section id="acceptable">
+        <h2><span class="section-num">4</span> Acceptable Use</h2>
+        <p>You agree <strong>not</strong> to use InquiAI to:</p>
+        <ul>
+          <li>Send spam, bulk unsolicited messages, or misleading communications</li>
+          <li>Impersonate any person or entity</li>
+          <li>Collect or harvest data from the Platform without authorisation</li>
+          <li>Reverse-engineer, decompile, or attempt to extract the Platform's source code</li>
+          <li>Resell, sublicense, or commercially exploit the Platform without written permission</li>
+          <li>Violate any applicable Indian law or regulation</li>
+          <li>Transmit malware, viruses, or any harmful code</li>
+          <li>Use the AI assistant to generate false, defamatory, or illegal content</li>
+        </ul>
+        <div class="highlight-box">
+          <p>Violation of acceptable use policies may result in immediate account suspension without refund.</p>
+        </div>
+      </section>
+
+      <section id="whatsapp">
+        <h2><span class="section-num">5</span> WhatsApp & Meta Compliance</h2>
+        <p>Your use of InquiAI's WhatsApp integration is additionally subject to:</p>
+        <ul>
+          <li><a href="https://www.whatsapp.com/legal/business-policy" target="_blank" style="color:var(--accent)">WhatsApp Business Policy</a></li>
+          <li><a href="https://www.whatsapp.com/legal/commerce-policy" target="_blank" style="color:var(--accent)">WhatsApp Commerce Policy</a></li>
+          <li><a href="https://developers.facebook.com/terms" target="_blank" style="color:var(--accent)">Meta Platform Terms</a></li>
+        </ul>
+        <p>You are solely responsible for ensuring your messaging practices comply with WhatsApp's policies, including obtaining valid opt-in consent from all recipients before sending messages.</p>
+        <div class="warn-box">
+          <p>⚠️ InquiAI is not liable for account bans or restrictions imposed by Meta/WhatsApp due to your messaging practices.</p>
+        </div>
+      </section>
+
+      <section id="subscription">
+        <h2><span class="section-num">6</span> Subscription & Billing</h2>
+        <p><strong>Trial Period:</strong> New accounts receive a 30-day unlimited trial. No payment is required during the trial.</p>
+        <p><strong>Paid Plans:</strong> After the trial, continued use requires a paid subscription. Current pricing is displayed at <a href="https://inquiai.in/#pricing" style="color:var(--accent)">inquiai.in/#pricing</a>.</p>
+        <ul>
+          <li>Subscriptions are billed monthly or annually as selected</li>
+          <li>Prices are in Indian Rupees (INR) and inclusive of applicable taxes</li>
+          <li>Payments are processed via third-party payment gateways</li>
+          <li>Subscriptions auto-renew unless cancelled before the renewal date</li>
+        </ul>
+        <p><strong>Refunds:</strong> We offer a 7-day refund on first-time purchases if you are unsatisfied. No refunds are issued for partial months or after the first billing cycle.</p>
+      </section>
+
+      <section id="data">
+        <h2><span class="section-num">7</span> Data Ownership</h2>
+        <p><strong>Your Data:</strong> You retain full ownership of all lead data, conversation data, and content you input into InquiAI. You grant InquiAI a limited licence to process this data solely for providing the service.</p>
+        <p><strong>AI Training Data:</strong> Chat exports and Q&A pairs you upload remain your property. They are used only to power your specific AI assistant and are not shared with other users or used to train any shared model.</p>
+        <p><strong>Platform Data:</strong> Aggregated, anonymised usage analytics generated by InquiAI remain our property.</p>
+      </section>
+
+      <section id="ip">
+        <h2><span class="section-num">8</span> Intellectual Property</h2>
+        <p>All software, design, trademarks, and content of the InquiAI platform (excluding your data) are the exclusive property of InquiAI and its founders. Nothing in these Terms grants you any rights to use InquiAI's brand, logo, or technology outside of normal platform use.</p>
+      </section>
+
+      <section id="liability">
+        <h2><span class="section-num">9</span> Limitation of Liability</h2>
+        <p>To the maximum extent permitted by applicable law:</p>
+        <ul>
+          <li>InquiAI is provided "as is" without warranties of any kind</li>
+          <li>We do not guarantee uninterrupted, error-free, or completely secure operation</li>
+          <li>We are not liable for any indirect, incidental, or consequential damages arising from your use of the Platform</li>
+          <li>Our total liability to you shall not exceed the amount you paid us in the 3 months preceding the claim</li>
+        </ul>
+        <div class="highlight-box">
+          <p>InquiAI is not responsible for outcomes of AI-generated responses sent to your leads. You should review and supervise AI behaviour for your specific use case.</p>
+        </div>
+      </section>
+
+      <section id="termination">
+        <h2><span class="section-num">10</span> Termination</h2>
+        <p><strong>By You:</strong> You may cancel your account at any time from the dashboard. Data export is available before deletion.</p>
+        <p><strong>By Us:</strong> We may suspend or terminate your account for breach of these Terms, non-payment, or prolonged inactivity (more than 90 days on a free plan). We will provide reasonable notice except in cases of serious violations.</p>
+        <p>Upon termination, your right to access the Platform ceases and your data will be deleted within 30 days per our Privacy Policy.</p>
+      </section>
+
+      <section id="disputes">
+        <h2><span class="section-num">11</span> Disputes & Governing Law</h2>
+        <p>These Terms are governed by the laws of India. Any disputes shall be subject to the exclusive jurisdiction of the courts of <strong>Pune, Maharashtra, India</strong>.</p>
+        <p>We encourage you to contact us first to resolve any dispute informally before initiating legal proceedings.</p>
+      </section>
+
+      <section id="changes">
+        <h2><span class="section-num">12</span> Changes to Terms</h2>
+        <p>We may update these Terms from time to time. Material changes will be communicated via email or an in-app notice at least 14 days before taking effect. Continued use after the effective date constitutes acceptance.</p>
+      </section>
+
+      <section id="contact">
+        <h2><span class="section-num">13</span> Contact Us</h2>
+        <div class="contact-card">
+          <p><strong>InquiAI</strong></p>
+          <p>For terms-related queries:</p>
+          <p>📧 <a href="mailto:legal@inquiai.in">legal@inquiai.in</a></p>
+          <p>🌐 <a href="https://inquiai.in">inquiai.in</a></p>
+          <p style="margin-top:12px; color:var(--muted); font-size:13px;">We aim to respond to all legal inquiries within 15 business days.</p>
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <footer>
+    <p>© 2025 InquiAI. All rights reserved. &nbsp;·&nbsp; <a href="/privacy-policy.html">Privacy Policy</a> &nbsp;·&nbsp; <a href="/terms-of-service.html">Terms of Service</a> &nbsp;·&nbsp; <a href="/">Home</a></p>
+  </footer>
+
+</body>
+</html>
