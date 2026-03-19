@@ -1223,7 +1223,7 @@ export default function Dashboard() {
       {/* ── Analytics Tab ────────────────────────────────────────────────────── */}
       {activeTab === 'analytics' && (
         <div>
-          {!isPremium(institute.plan) ? (
+          {!premiumUnlocked  ? (
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📊</div>
@@ -1514,7 +1514,7 @@ export default function Dashboard() {
       {/* ── Widget Tab ───────────────────────────────────────────────────────── */}
       {activeTab === 'widget' && (
         <div>
-          {!isPremium(institute.plan) ? (
+          {!premiumUnlocked ? (
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">💬</div>
