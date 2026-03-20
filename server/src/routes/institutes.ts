@@ -591,6 +591,20 @@ router.get('/verify-reset-token/:token', async (req: Request, res: Response) => 
   }
 });
 
+router.post('/:id/clear-all-sessions', async (req, res) => {
+  const { id } = req.params;
+  const fs = await import('fs');
+  const path = await import('path');
+  // Clear old whatsapp-web.js auth
+  const oldPath = path.join(process.cwd(), '.wwebjs_auth', `session-institute-${id}`);
+  // Clear new Baileys auth
+  const newPath = path.join(process.cwd(), '.baileys_auth', `institute-${id}`);
+  fs.rmSync(oldPath, { recursive: true, force: true });
+  fs.rmSync(newPath, { recursive: true, force: true });
+  await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(id)]);
+  res.json({ success: true });
+});
+
 // GET /api/institutes/:id/profile-completeness
 // Returns a completeness score for the institute's AI knowledge base.
 router.get('/:id/profile-completeness', async (req: Request, res: Response) => {
