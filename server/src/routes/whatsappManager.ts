@@ -375,19 +375,35 @@ export async function initSession(instituteId: string): Promise<void> {
       )
     `);
 
+    // Replacer: converts Uint8Array/Buffer → {type:'Buffer',data:[...]} for DB storage
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bufferReplacer = (_: string, val: any) => {
+      if (val instanceof Uint8Array || Buffer.isBuffer(val)) {
+        return { type: 'Buffer', data: Array.from(val as Uint8Array) };
+      }
+      return val;
+    };
+
+    // Reviver: converts {type:'Buffer',data:[...]} back to Uint8Array on read
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const bufferReviver = (_: string, val: any) => {
+      if (val && typeof val === 'object' && val.type === 'Buffer' && Array.isArray(val.data)) {
+        return new Uint8Array(val.data);
+      }
+      return val;
+    };
+
     const readData = async (keyId: string) => {
       const result = await pool.query(
         'SELECT key_data FROM baileys_auth WHERE institute_id = $1 AND key_id = $2',
         [Number(instituteId), keyId],
       );
       if (!result.rows[0]) return null;
-      return JSON.parse(result.rows[0].key_data);
+      return JSON.parse(result.rows[0].key_data, bufferReviver);
     };
 
     const writeData = async (keyId: string, data: unknown) => {
-      const json = JSON.stringify(data, (_, val) =>
-        val instanceof Uint8Array ? { type: 'Buffer', data: Array.from(val) } : val
-      );
+      const json = JSON.stringify(data, bufferReplacer);
       await pool.query(
         `INSERT INTO baileys_auth (institute_id, key_id, key_data)
          VALUES ($1, $2, $3)
