@@ -282,7 +282,7 @@ async function buildSystemPrompt(
 
 // ── Generate AI reply ─────────────────────────────────────────────────────────
 
-async function getAIReply(
+export async function getAIReply(
   instituteId: number,
   studentPhone: string,
   messageText: string,
