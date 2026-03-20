@@ -4,6 +4,7 @@ import qrcode from 'qrcode';
 import pool from '../db';
 import { initSession, getSessionState, disconnectSession } from './whatsappManager';
 import { scrapeAndEnrich, getInstituteDetails, scoreProfileCompleteness } from './instituteEnrichment';
+import { sendWelcomeEmail, sendPasswordResetEmail } from './emailService';
 
 const router = Router();
 
@@ -112,6 +113,12 @@ router.post('/register', async (req: Request, res: Response) => {
 
     // Fire-and-forget: enrich institute data in background (does not block registration response)
     void scrapeAndEnrich(newId, name.trim(), websiteClean);
+
+    // Fire-and-forget: send welcome email
+    void sendWelcomeEmail({
+      toEmail: email.trim().toLowerCase(),
+      instituteName: name.trim(),
+    }).catch(err => console.error('[Email] Welcome email failed:', err));
 
     res.status(201).json({
       id: newId,
@@ -436,6 +443,151 @@ router.post('/:id/clear-session', async (req, res) => {
     res.json({ success: true, cleared: sessionPath });
   } catch (err) {
     res.json({ success: false, error: String(err) });
+  }
+});
+
+// ── Password Reset ────────────────────────────────────────────────────────────
+
+// POST /api/institutes/forgot-password
+// Generates a reset token and sends email.
+router.post('/forgot-password', async (req: Request, res: Response) => {
+  const { email } = req.body as { email?: string };
+  if (!email || typeof email !== 'string') {
+    res.status(400).json({ error: 'Email is required.' });
+    return;
+  }
+
+  try {
+    // Ensure reset tokens table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id          SERIAL PRIMARY KEY,
+        institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+        token       TEXT NOT NULL UNIQUE,
+        expires_at  TIMESTAMPTZ NOT NULL,
+        used        BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
+    const result = await pool.query(
+      'SELECT id, name, email FROM institutes WHERE email = $1',
+      [email.trim().toLowerCase()],
+    );
+    const institute = result.rows[0] as { id: number; name: string; email: string } | undefined;
+
+    // Always return success to prevent email enumeration attacks
+    if (!institute) {
+      res.json({ success: true });
+      return;
+    }
+
+    // Delete any existing unused tokens for this institute
+    await pool.query(
+      'DELETE FROM password_reset_tokens WHERE institute_id = $1 AND used = FALSE',
+      [institute.id],
+    );
+
+    // Generate a secure token
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000); // 1 hour
+
+    await pool.query(
+      'INSERT INTO password_reset_tokens (institute_id, token, expires_at) VALUES ($1, $2, $3)',
+      [institute.id, token, expiresAt],
+    );
+
+    void sendPasswordResetEmail({
+      toEmail: institute.email,
+      instituteName: institute.name,
+      resetToken: token,
+    }).catch(err => console.error('[Email] Password reset email failed:', err));
+
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Forgot password error:', err);
+    res.status(500).json({ error: 'Failed to process request.' });
+  }
+});
+
+// POST /api/institutes/reset-password
+// Validates token and sets new password.
+router.post('/reset-password', async (req: Request, res: Response) => {
+  const { token, password } = req.body as { token?: string; password?: string };
+
+  if (!token || typeof token !== 'string') {
+    res.status(400).json({ error: 'Reset token is required.' });
+    return;
+  }
+  if (!password || typeof password !== 'string' || password.length < 6) {
+    res.status(400).json({ error: 'Password must be at least 6 characters.' });
+    return;
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT t.id, t.institute_id, t.expires_at, t.used
+       FROM password_reset_tokens t
+       WHERE t.token = $1`,
+      [token],
+    );
+
+    const row = result.rows[0] as {
+      id: number; institute_id: number; expires_at: string; used: boolean;
+    } | undefined;
+
+    if (!row) {
+      res.status(400).json({ error: 'Invalid or expired reset link. Please request a new one.' });
+      return;
+    }
+    if (row.used) {
+      res.status(400).json({ error: 'This reset link has already been used. Please request a new one.' });
+      return;
+    }
+    if (new Date(row.expires_at) < new Date()) {
+      res.status(400).json({ error: 'This reset link has expired. Please request a new one.' });
+      return;
+    }
+
+    // Hash and save new password
+    const passwordHash = hashPassword(password);
+    await pool.query(
+      'UPDATE institutes SET password_hash = $1 WHERE id = $2',
+      [passwordHash, row.institute_id],
+    );
+
+    // Mark token as used
+    await pool.query(
+      'UPDATE password_reset_tokens SET used = TRUE WHERE id = $1',
+      [row.id],
+    );
+
+    console.log(`[Auth] Password reset successful for institute ${row.institute_id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Reset password error:', err);
+    res.status(500).json({ error: 'Failed to reset password.' });
+  }
+});
+
+// GET /api/institutes/verify-reset-token/:token
+// Checks if a reset token is valid before showing the reset form.
+router.get('/verify-reset-token/:token', async (req: Request, res: Response) => {
+  const { token } = req.params;
+  try {
+    const result = await pool.query(
+      `SELECT expires_at, used FROM password_reset_tokens WHERE token = $1`,
+      [token],
+    );
+    const row = result.rows[0] as { expires_at: string; used: boolean } | undefined;
+
+    if (!row || row.used || new Date(row.expires_at) < new Date()) {
+      res.json({ valid: false });
+      return;
+    }
+    res.json({ valid: true });
+  } catch {
+    res.json({ valid: false });
   }
 });
 

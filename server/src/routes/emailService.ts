@@ -288,7 +288,101 @@ export async function sendWeeklySummaryEmail(opts: {
   console.log(`[Email] Weekly summary sent to ${toEmail}`);
 }
 
-// ── 5. Plan Upgrade Request (Admin Notification) ──────────────────────────────
+// ── 6. Welcome Email (post-registration) ─────────────────────────────────────
+
+export async function sendWelcomeEmail(opts: {
+  toEmail: string;
+  instituteName: string;
+  dashboardUrl?: string;
+}): Promise<void> {
+  const {
+    toEmail, instituteName,
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">👋 Welcome to InquiAI, ${instituteName}!</h2>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">
+      Your account is ready. You're on a <strong>30-day free trial</strong> with full access to all features.
+    </p>
+
+    ${infoBox(`
+      <p style="margin:0 0 12px;font-size:14px;font-weight:700;color:#1f2937;">🚀 Get started in 3 steps</p>
+      <p style="margin:0 0 10px;font-size:13px;color:#374151;">
+        <strong>1. Connect WhatsApp</strong> — Go to your dashboard → WhatsApp tab → scan the QR code with your institute's WhatsApp number.
+      </p>
+      <p style="margin:0 0 10px;font-size:13px;color:#374151;">
+        <strong>2. Complete your profile</strong> — Add your courses, fees, and contact details so the AI can answer student queries accurately.
+      </p>
+      <p style="margin:0;font-size:13px;color:#374151;">
+        <strong>3. Share your number</strong> — Start sharing your WhatsApp number with prospective students. Every inquiry will be auto-replied and captured as a lead.
+      </p>
+    `)}
+
+    <div style="background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:16px 20px;margin:16px 0;">
+      <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#374151;">✅ What's included in your trial</p>
+      <p style="margin:0;font-size:13px;color:#6b7280;line-height:1.8;">
+        Unlimited leads · AI auto-replies 24/7 · Lead dashboard · Analytics · Chat widget · AI Training · Follow-up management
+      </p>
+    </div>
+
+    <p style="color:#6b7280;font-size:13px;margin-top:16px;">
+      Need help? Reply to this email or WhatsApp us anytime.
+    </p>
+    ${ctaButton('Open Your Dashboard →', dashboardUrl)}
+  `;
+
+  await sendEmail({
+    to: toEmail,
+    subject: `🎉 Welcome to InquiAI — Your 30-day trial has started!`,
+    html: baseTemplate('Welcome to InquiAI', body),
+  });
+
+  console.log(`[Email] Welcome email sent to ${toEmail}`);
+}
+
+// ── 7. Password Reset ─────────────────────────────────────────────────────────
+
+export async function sendPasswordResetEmail(opts: {
+  toEmail: string;
+  instituteName: string;
+  resetToken: string;
+  resetUrl?: string;
+}): Promise<void> {
+  const {
+    toEmail, instituteName, resetToken,
+    resetUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
+
+  const resetLink = `${resetUrl}/reset-password?token=${resetToken}`;
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">🔑 Reset Your Password</h2>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">
+      We received a request to reset the password for <strong>${instituteName}</strong>.
+      Click the button below to set a new password.
+    </p>
+
+    ${ctaButton('Reset Password →', resetLink)}
+
+    ${infoBox(`
+      <p style="margin:0 0 6px;font-size:13px;font-weight:600;color:#92400e;">⏰ This link expires in 1 hour</p>
+      <p style="margin:0;font-size:13px;color:#92400e;">If you didn't request a password reset, you can safely ignore this email.</p>
+    `, '#f59e0b')}
+
+    <p style="color:#9ca3af;font-size:12px;margin-top:20px;word-break:break-all;">
+      If the button doesn't work, copy this link: ${resetLink}
+    </p>
+  `;
+
+  await sendEmail({
+    to: toEmail,
+    subject: `🔑 Reset your InquiAI password`,
+    html: baseTemplate('Reset Password', body),
+  });
+
+  console.log(`[Email] Password reset email sent to ${toEmail}`);
+}
 
 export async function sendUpgradeRequestEmail(opts: {
   adminEmail: string;
