@@ -372,7 +372,7 @@ export async function initSession(instituteId: string): Promise<void> {
       DisconnectReason,
     } = await getBaileys();
 
-    const { state: authState, saveCreds } = await useMultiFileAuthState(authDir(instituteId));
+    const { state: authState, saveCreds } = await useMultiFileAuthState('/tmp/baileys_auth/institute-' + instituteId);
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
