@@ -24,7 +24,6 @@ async function getBaileys(): Promise<BaileysModule> {
   return _baileys;
 }
 
-import path from 'path';
 import OpenAI from 'openai';
 import pool from '../db';
 import { isNumberBlocked } from './blocklist';
@@ -52,12 +51,6 @@ interface MessageRow {
 
 const sessions = new Map<string, SessionState>();
 const initLocks = new Set<string>();
-
-// Auth files stored in .baileys_auth/<institute-id>/
-// These persist across restarts on Railway (not across redeploys).
-function authDir(instituteId: string): string {
-  return path.join(process.cwd(), '.baileys_auth', `institute-${instituteId}`);
-}
 
 // ── OpenAI client ─────────────────────────────────────────────────────────────
 
@@ -365,14 +358,80 @@ export async function initSession(instituteId: string): Promise<void> {
 
   try {
     const {
-      useMultiFileAuthState,
       fetchLatestBaileysVersion,
       makeCacheableSignalKeyStore,
       default: makeWASocket,
       DisconnectReason,
+      initAuthCreds,
+      BufferJSON,
     } = await getBaileys();
 
-    const { state: authState, saveCreds } = await useMultiFileAuthState('/tmp/baileys_auth/institute-' + instituteId);
+    // ── DB-backed auth state ──────────────────────────────────────────────
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS baileys_auth (
+        institute_id INTEGER NOT NULL,
+        key_id       TEXT NOT NULL,
+        key_data     TEXT NOT NULL,
+        PRIMARY KEY  (institute_id, key_id)
+      )
+    `);
+
+    const readData = async (keyId: string) => {
+      const result = await pool.query(
+        'SELECT key_data FROM baileys_auth WHERE institute_id = $1 AND key_id = $2',
+        [Number(instituteId), keyId],
+      );
+      if (!result.rows[0]) return null;
+      return JSON.parse(result.rows[0].key_data, BufferJSON.reviver);
+    };
+
+    const writeData = async (keyId: string, data: unknown) => {
+      const json = JSON.stringify(data, BufferJSON.replacer);
+      await pool.query(
+        `INSERT INTO baileys_auth (institute_id, key_id, key_data)
+         VALUES ($1, $2, $3)
+         ON CONFLICT (institute_id, key_id)
+         DO UPDATE SET key_data = EXCLUDED.key_data`,
+        [Number(instituteId), keyId, json],
+      );
+    };
+
+    const removeData = async (keyId: string) => {
+      await pool.query(
+        'DELETE FROM baileys_auth WHERE institute_id = $1 AND key_id = $2',
+        [Number(instituteId), keyId],
+      );
+    };
+
+    const creds = (await readData('creds')) ?? initAuthCreds();
+
+    const authState = {
+      creds,
+      keys: {
+        get: async (type: string, ids: string[]) => {
+          const data: Record<string, unknown> = {};
+          await Promise.all(ids.map(async (id) => {
+            const val = await readData(`${type}-${id}`);
+            if (val) data[id] = val;
+          }));
+          return data;
+        },
+        set: async (data: Record<string, Record<string, unknown>>) => {
+          await Promise.all(
+            Object.entries(data).flatMap(([type, entries]) =>
+              Object.entries(entries).map(([id, val]) =>
+                val != null
+                  ? writeData(`${type}-${id}`, val)
+                  : removeData(`${type}-${id}`),
+              ),
+            ),
+          );
+        },
+      },
+    };
+
+    const saveCreds = async () => { await writeData('creds', authState.creds); };
+
     const { version } = await fetchLatestBaileysVersion();
 
     const sock = makeWASocket({
@@ -434,7 +493,7 @@ export async function initSession(instituteId: string): Promise<void> {
       if (connection === 'close') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 515;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
         console.log(`[WA] Connection closed for institute ${instituteId}. Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
 
