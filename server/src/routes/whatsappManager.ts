@@ -498,7 +498,18 @@ export async function initSession(instituteId: string): Promise<void> {
     void saveLead(Number(instituteId), studentPhone, messageText);
   });
 
-  await client.initialize();
+  try {
+    await client.initialize();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[WA] client.initialize() failed for institute ${instituteId}: ${msg}`);
+    sessions.delete(instituteId);
+    initLocks.delete(instituteId);
+    await pool.query(
+      `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
+      [Number(instituteId)]
+    );
+  }
 }
 
 // ── Exports ──────────────────────────────────────────────────────────────────
