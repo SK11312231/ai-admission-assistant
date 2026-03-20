@@ -363,7 +363,6 @@ export async function initSession(instituteId: string): Promise<void> {
       default: makeWASocket,
       DisconnectReason,
       initAuthCreds,
-      BufferJSON,
     } = await getBaileys();
 
     // ── DB-backed auth state ──────────────────────────────────────────────
@@ -382,11 +381,13 @@ export async function initSession(instituteId: string): Promise<void> {
         [Number(instituteId), keyId],
       );
       if (!result.rows[0]) return null;
-      return JSON.parse(result.rows[0].key_data, BufferJSON.reviver);
+      return JSON.parse(result.rows[0].key_data);
     };
 
     const writeData = async (keyId: string, data: unknown) => {
-      const json = JSON.stringify(data, BufferJSON.replacer);
+      const json = JSON.stringify(data, (_, val) =>
+        val instanceof Uint8Array ? { type: 'Buffer', data: Array.from(val) } : val
+      );
       await pool.query(
         `INSERT INTO baileys_auth (institute_id, key_id, key_data)
          VALUES ($1, $2, $3)
@@ -493,7 +494,7 @@ export async function initSession(instituteId: string): Promise<void> {
       if (connection === 'close') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 515;
 
         console.log(`[WA] Connection closed for institute ${instituteId}. Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
 
