@@ -377,7 +377,7 @@ function makeClient(instituteId: string): Client {
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
-        '--single-process',        // ← was missing
+        '--single-process',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
