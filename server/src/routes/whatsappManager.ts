@@ -5,21 +5,29 @@
  * Baileys uses a direct WebSocket connection to WhatsApp — no Chromium needed.
  * This is stable, lightweight, and works perfectly on Railway.
  *
- * Install before deploying:
- *   npm install @whiskeysockets/baileys @hapi/boom pino
- *   (in the server/ workspace or root depending on your monorepo setup)
+ * Baileys is ESM-only. Since this server compiles to CommonJS, we use a
+ * dynamic import() wrapper to load it at runtime — fully supported in Node 20.
  */
 
-import makeWASocket, {
-  useMultiFileAuthState,
-  DisconnectReason,
-  fetchLatestBaileysVersion,
-  makeCacheableSignalKeyStore,
-  proto,
-  WASocket,
-} from '@whiskeysockets/baileys';
-import { Boom } from '@hapi/boom';
-import qrcode from 'qrcode';
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type BaileysModule = typeof import('@whiskeysockets/baileys');
+
+let _baileys: BaileysModule | null = null;
+async function getBaileys(): Promise<BaileysModule> {
+  if (!_baileys) {
+    _baileys = await import('@whiskeysockets/baileys') as BaileysModule;
+  }
+  return _baileys;
+}
+
+let _boom: typeof import('@hapi/boom') | null = null;
+async function getBoom(): Promise<typeof import('@hapi/boom')> {
+  if (!_boom) {
+    _boom = await import('@hapi/boom') as typeof import('@hapi/boom');
+  }
+  return _boom;
+}
+
 import path from 'path';
 import OpenAI from 'openai';
 import pool from '../db';
@@ -33,8 +41,9 @@ import { getPersonalityProfile, getRelevantExamples } from './chatTraining';
 export type WAStatus = 'initializing' | 'qr' | 'connected' | 'disconnected';
 
 interface SessionState {
-  socket: WASocket | null;
-  qr: string | null;        // raw QR string (not data URL)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  socket: any | null;
+  qr: string | null;
   status: WAStatus;
 }
 
@@ -359,6 +368,15 @@ export async function initSession(instituteId: string): Promise<void> {
   sessions.set(instituteId, state);
 
   try {
+    const {
+      useMultiFileAuthState,
+      fetchLatestBaileysVersion,
+      makeCacheableSignalKeyStore,
+      default: makeWASocket,
+      DisconnectReason,
+    } = await getBaileys();
+    const { Boom } = await getBoom();
+
     const { state: authState, saveCreds } = await useMultiFileAuthState(authDir(instituteId));
     const { version } = await fetchLatestBaileysVersion();
 
@@ -368,9 +386,11 @@ export async function initSession(instituteId: string): Promise<void> {
         creds: authState.creds,
         keys: makeCacheableSignalKeyStore(authState.keys, {
           level: 'silent',
-        } as Parameters<typeof makeCacheableSignalKeyStore>[1]),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any),
       },
       printQRInTerminal: false,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       logger: {
         level: 'silent',
         trace: () => {},
@@ -381,15 +401,11 @@ export async function initSession(instituteId: string): Promise<void> {
         fatal: (msg: unknown) => console.error('[Baileys FATAL]', msg),
         child: () => ({
           level: 'silent',
-          trace: () => {},
-          debug: () => {},
-          info: () => {},
-          warn: () => {},
-          error: () => {},
-          fatal: () => {},
-          child: () => ({} as ReturnType<typeof makeWASocket>['logger']),
+          trace: () => {}, debug: () => {}, info: () => {},
+          warn: () => {}, error: () => {}, fatal: () => {},
+          child: () => ({} as any),
         }),
-      } as Parameters<typeof makeWASocket>[0]['logger'],
+      } as any,
       browser: ['InquiAI', 'Chrome', '120.0'],
       connectTimeoutMs: 60_000,
       retryRequestDelayMs: 500,
