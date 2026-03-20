@@ -10,12 +10,16 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-type BaileysModule = typeof import('@whiskeysockets/baileys');
+type BaileysModule = any;
 
 let _baileys: BaileysModule | null = null;
 async function getBaileys(): Promise<BaileysModule> {
   if (!_baileys) {
-    _baileys = await import('@whiskeysockets/baileys') as BaileysModule;
+    // Use new Function to bypass TypeScript's CommonJS transform of dynamic import.
+    // TypeScript converts `await import(...)` to `require(...)` when targeting CommonJS,
+    // which breaks ESM-only packages like Baileys. This trick forces a true ESM dynamic import.
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval
+    _baileys = await (new Function('return import("@whiskeysockets/baileys")')() as Promise<BaileysModule>);
   }
   return _baileys;
 }
