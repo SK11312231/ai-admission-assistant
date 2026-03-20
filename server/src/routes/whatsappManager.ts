@@ -363,10 +363,7 @@ export async function getAIReply(
 function makeClient(instituteId: string): Client {
   return new Client({
     authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
-    webVersionCache: {
-      type: 'remote',
-      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1015901307-alpha.html',
-    },
+    webVersionCache: { type: 'none' },
     puppeteer: {
       args: [
         '--no-sandbox',
@@ -377,11 +374,13 @@ function makeClient(instituteId: string): Client {
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
-        '--single-process',
+        '--disable-features=site-per-process',  // ← replaces --single-process
+        '--disable-web-security',
+        '--allow-running-insecure-content',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
-      timeout: 60000,              // ← was missing
+      timeout: 60000,
     },
   });
 }
