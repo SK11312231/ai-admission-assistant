@@ -353,7 +353,7 @@ export async function sendPasswordResetEmail(opts: {
     resetUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
   } = opts;
 
-  const resetLink = `${resetUrl}/reset-password?token=${resetToken}`;
+  const resetLink = `${resetUrl}reset-password?token=${resetToken}`;
 
   const body = `
     <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">🔑 Reset Your Password</h2>
