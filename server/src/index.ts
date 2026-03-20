@@ -128,8 +128,11 @@ app.get('*', defaultLimiter, (req, res, next) => {
       console.warn('⚠️  Plan constraint migration skipped (table may not exist yet):', err);
     }
 
-    await restoreAllSessions();
-    console.log('✅ WhatsApp sessions restored.');
+    // Delay session restore to let the server stabilize first
+    setTimeout(() => {
+      void restoreAllSessions();
+      console.log('✅ WhatsApp sessions restored.');
+    }, 10_000); // 10 second delay
 
     startScheduler();
 

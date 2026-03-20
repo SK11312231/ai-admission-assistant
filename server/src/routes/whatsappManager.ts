@@ -538,8 +538,15 @@ export async function restoreAllSessions(): Promise<void> {
     const result = await pool.query(`SELECT id FROM institutes WHERE whatsapp_connected = TRUE`);
     const ids: number[] = result.rows.map((r: { id: number }) => r.id);
     console.log(`[WA] Restoring ${ids.length} session(s)...`);
-    for (const id of ids) void initSession(String(id));
-  } catch (err) {
+    for (const id of ids) {
+      // Stagger session restores — don't launch all Chromium instances simultaneously
+      await new Promise(resolve => setTimeout(resolve, 3000));
+      void initSession(String(id)).catch(err => {
+        console.error(`[WA] Session restore failed for institute ${id}:`, err);
+      });
+    } 
+  }
+  catch (err) {
     console.error('[WA] restoreAllSessions failed:', err);
   }
 }
