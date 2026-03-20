@@ -365,7 +365,7 @@ function makeClient(instituteId: string): Client {
     authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
     webVersionCache: {
       type: 'remote',
-      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.2412.54.html',
+      remotePath: 'https://raw.githubusercontent.com/wppconnect-team/wa-version/main/html/2.3000.1015901307-alpha.html',
     },
     puppeteer: {
       args: [
@@ -377,9 +377,11 @@ function makeClient(instituteId: string): Client {
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
+        '--single-process',        // ← was missing
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
+      timeout: 60000,              // ← was missing
     },
   });
 }
