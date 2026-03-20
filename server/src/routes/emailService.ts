@@ -1,15 +1,15 @@
 // ── SendGrid HTTP API email service ──────────────────────────────────────────
 //
-// Previously used nodemailer + SendGrid SMTP (port 587).
-// Railway blocks outbound SMTP on port 587 → ETIMEDOUT errors.
-// SendGrid HTTP API uses port 443 (HTTPS) — never blocked on Railway.
-// No npm packages needed beyond what's already installed (uses native fetch).
+// Switched from SendGrid to Resend (resend.com).
+// Resend free tier = 3,000 emails/month — much more generous than SendGrid.
+// Uses the same HTTPS API pattern, no npm packages needed.
 //
 // Required Railway environment variables:
-//   SENDGRID_API_KEY  — your SendGrid API key (starts with SG.)
-//   SENDGRID_FROM     — verified sender email in your SendGrid account
-//                       Must be verified at: sendgrid.com → Settings → Sender Authentication
-//                       If not verified, SendGrid silently drops every email.
+//   RESEND_API_KEY   — your Resend API key (starts with re_)
+//   SENDGRID_FROM    — verified sender email (reuse existing variable)
+//                      Must use a domain you've verified in Resend dashboard.
+//                      For quick testing, use: onboarding@resend.dev (Resend's test address)
+//                      For production: add your domain at resend.com → Domains
 
 interface MailPayload {
   to: string;
@@ -20,42 +20,41 @@ interface MailPayload {
 // ── Core send function (pure HTTPS, no nodemailer) ────────────────────────────
 
 async function sendEmail(payload: MailPayload): Promise<void> {
-  const apiKey = process.env.SENDGRID_API_KEY;
+  const apiKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.SENDGRID_FROM ?? process.env.EMAIL_USER;
 
   if (!apiKey) {
-    throw new Error('SENDGRID_API_KEY environment variable is not set.');
+    throw new Error('RESEND_API_KEY environment variable is not set.');
   }
   if (!fromEmail) {
     throw new Error(
       'SENDGRID_FROM environment variable is not set. ' +
-      'Set it to a verified sender email in your SendGrid account.',
+      'Set it to a verified sender email in your Resend account.',
     );
   }
 
-  const response = await fetch('https://api.sendgrid.com/v3/mail/send', {
+  const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      personalizations: [{ to: [{ email: payload.to }] }],
-      from: { email: fromEmail, name: 'InquiAI' },
+      from: `InquiAI <${fromEmail}>`,
+      to: [payload.to],
       subject: payload.subject,
-      content: [{ type: 'text/html', value: payload.html }],
+      html: payload.html,
     }),
   });
 
   if (!response.ok) {
     let details = '';
     try {
-      const errBody = await response.json() as { errors?: Array<{ message: string }> };
-      details = errBody.errors?.map(e => e.message).join(', ') ?? '';
+      const errBody = await response.json() as { message?: string; name?: string };
+      details = errBody.message ?? errBody.name ?? '';
     } catch { /* ignore json parse failure */ }
-    throw new Error(`SendGrid ${response.status}: ${details || response.statusText}`);
+    throw new Error(`Resend ${response.status}: ${details || response.statusText}`);
   }
-  // 202 Accepted = queued successfully
 }
 
 // ── Base HTML template ────────────────────────────────────────────────────────
