@@ -20,14 +20,6 @@ async function getBaileys(): Promise<BaileysModule> {
   return _baileys;
 }
 
-let _boom: typeof import('@hapi/boom') | null = null;
-async function getBoom(): Promise<typeof import('@hapi/boom')> {
-  if (!_boom) {
-    _boom = await import('@hapi/boom') as typeof import('@hapi/boom');
-  }
-  return _boom;
-}
-
 import path from 'path';
 import OpenAI from 'openai';
 import pool from '../db';
@@ -375,7 +367,6 @@ export async function initSession(instituteId: string): Promise<void> {
       default: makeWASocket,
       DisconnectReason,
     } = await getBaileys();
-    const { Boom } = await getBoom();
 
     const { state: authState, saveCreds } = await useMultiFileAuthState(authDir(instituteId));
     const { version } = await fetchLatestBaileysVersion();
@@ -436,7 +427,8 @@ export async function initSession(instituteId: string): Promise<void> {
       }
 
       if (connection === 'close') {
-        const statusCode = (lastDisconnect?.error as Boom)?.output?.statusCode;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
         const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
 
         console.log(`[WA] Connection closed for institute ${instituteId}. Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
