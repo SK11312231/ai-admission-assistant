@@ -434,7 +434,7 @@ export async function initSession(instituteId: string): Promise<void> {
       if (connection === 'close') {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut;
+        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 515;
 
         console.log(`[WA] Connection closed for institute ${instituteId}. Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
 
