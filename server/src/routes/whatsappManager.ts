@@ -410,7 +410,8 @@ export async function initSession(instituteId: string): Promise<void> {
     state.socket = sock;
 
     // ── Connection updates ──────────────────────────────────────────────────
-    sock.ev.on('connection.update', async (update) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sock.ev.on('connection.update', async (update: any) => {
       const { connection, lastDisconnect, qr } = update;
 
       if (qr) {
@@ -470,7 +471,8 @@ export async function initSession(instituteId: string): Promise<void> {
     sock.ev.on('creds.update', saveCreds);
 
     // ── Incoming messages ───────────────────────────────────────────────────
-    sock.ev.on('messages.upsert', async ({ messages: msgs, type }) => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sock.ev.on('messages.upsert', async ({ messages: msgs, type }: { messages: any[]; type: any }) => {
       if (type !== 'notify') return;
 
       for (const msg of msgs) {
