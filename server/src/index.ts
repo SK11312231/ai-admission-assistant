@@ -84,6 +84,18 @@ app.get('/health', defaultLimiter, async (_req, res) => {
   }
 });
 
+app.get('/demo', (_req, res) => {
+  res.sendFile(path.join(clientDist, 'demo.html'));
+});
+
+app.get('/privacy-policy', (_req, res) => {
+  res.sendFile(path.join(clientDist, 'privacy-policy.html'));
+});
+
+app.get('/terms-of-service', (_req, res) => {
+  res.sendFile(path.join(clientDist, 'terms-of-service.html'));
+});
+
 // Serve the compiled React frontend
 const clientDist = path.join(process.cwd(), 'client', 'dist');
 if (!fs.existsSync(clientDist)) {

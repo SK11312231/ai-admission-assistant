@@ -22,6 +22,9 @@ export default function App() {
             <Route path="/chat" element={<Chat />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />
+            <Route path="/demo" element={null} />
+            <Route path="/privacy-policy" element={null} />
+            <Route path="/terms-of-service" element={null} />
           </Routes>
         </main>
       </div>
