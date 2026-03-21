@@ -884,14 +884,138 @@
 <!-- ── CTA ── -->
 <section id="contact" class="cta-banner">
   <h2>Ready to stop missing leads?</h2>
-  <p>Start your free 30-day trial today. No credit card. Setup in 5 minutes.</p>
-  <a href="https://inquiai.in/register" class="btn-primary" style="display:inline-flex;">
-    🚀 Register Your Institute Free →
-  </a>
+  <p>Book a free 15-minute call. We'll set up InquiAI for your institute live on the call.</p>
+  <button onclick="openModal()" class="btn-primary" style="display:inline-flex;border:none;cursor:pointer;font-size:15px;padding:16px 36px;">
+    📞 Schedule a Free Call →
+  </button>
   <p style="margin-top:20px;font-size:12px;color:#4b5563;">
-    Questions? WhatsApp us or email <a href="mailto:hello@inquiai.in" style="color:#a5b4fc;">hello@inquiai.in</a>
+    Questions? Email <a href="mailto:hello@inquiai.in" style="color:#a5b4fc;">hello@inquiai.in</a>
   </p>
 </section>
+
+<!-- ── SCHEDULE CALL MODAL ── -->
+<div id="scheduleModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:999;align-items:center;justify-content:center;padding:20px;">
+  <div style="background:#fff;border-radius:24px;width:100%;max-width:480px;overflow:hidden;box-shadow:0 32px 80px rgba(0,0,0,0.3);">
+    <div style="background:linear-gradient(135deg,#4f46e5,#7c3aed);padding:28px 32px 24px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;">
+        <h3 style="color:#fff;font-size:1.2rem;font-weight:700;">📞 Schedule a Free Call</h3>
+        <button onclick="closeModal()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;width:32px;height:32px;border-radius:50%;cursor:pointer;font-size:16px;display:flex;align-items:center;justify-content:center;">✕</button>
+      </div>
+      <p style="color:#c7d2fe;font-size:13px;">We'll set up InquiAI for your institute live on the call — takes just 15 minutes.</p>
+    </div>
+    <div style="padding:28px 32px 32px;">
+      <div id="formError" style="display:none;background:#fef2f2;border:1px solid #fecaca;color:#dc2626;font-size:13px;padding:10px 14px;border-radius:10px;margin-bottom:16px;"></div>
+      <div style="display:flex;flex-direction:column;gap:16px;">
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Your Name <span style="color:#ef4444;">*</span></label>
+          <input id="f_name" type="text" placeholder="e.g. Rajesh Sharma"
+            style="width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:'Sora',sans-serif;outline:none;transition:border-color 0.2s;"
+            onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e5e7eb'" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Institute Name <span style="color:#ef4444;">*</span></label>
+          <input id="f_institute" type="text" placeholder="e.g. ABC Coaching Center"
+            style="width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:'Sora',sans-serif;outline:none;transition:border-color 0.2s;"
+            onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e5e7eb'" />
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Approx. Number of Students <span style="color:#ef4444;">*</span></label>
+          <select id="f_size"
+            style="width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:'Sora',sans-serif;outline:none;background:#fff;transition:border-color 0.2s;"
+            onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e5e7eb'">
+            <option value="">Select institute size</option>
+            <option value="Less than 50 students">Less than 50 students</option>
+            <option value="50–200 students">50–200 students</option>
+            <option value="200–500 students">200–500 students</option>
+            <option value="500–1000 students">500–1000 students</option>
+            <option value="1000+ students">1000+ students</option>
+          </select>
+        </div>
+        <div>
+          <label style="display:block;font-size:12px;font-weight:600;color:#374151;margin-bottom:5px;">Mobile Number <span style="color:#ef4444;">*</span></label>
+          <input id="f_mobile" type="tel" placeholder="e.g. 9876543210"
+            style="width:100%;padding:10px 14px;border:1.5px solid #e5e7eb;border-radius:10px;font-size:14px;font-family:'Sora',sans-serif;outline:none;transition:border-color 0.2s;"
+            onfocus="this.style.borderColor='#6366f1'" onblur="this.style.borderColor='#e5e7eb'" />
+        </div>
+        <div>
+          <label style="display:flex;align-items:flex-start;gap:10px;cursor:pointer;">
+            <input id="f_pilot" type="checkbox" checked style="margin-top:2px;width:16px;height:16px;accent-color:#6366f1;flex-shrink:0;" />
+            <span style="font-size:13px;color:#374151;">Yes, I'm interested in a <strong>free pilot trial</strong> for my institute</span>
+          </label>
+        </div>
+      </div>
+      <button onclick="submitForm()" id="submitBtn"
+        style="width:100%;margin-top:22px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:14px;border-radius:12px;font-size:14px;font-weight:600;font-family:'Sora',sans-serif;cursor:pointer;transition:opacity 0.2s;">
+        📲 Send My Details →
+      </button>
+      <p style="text-align:center;font-size:11px;color:#9ca3af;margin-top:10px;">We'll reach out within 2 hours on WhatsApp</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  function openModal() {
+    document.getElementById('scheduleModal').style.display = 'flex';
+    document.body.style.overflow = 'hidden';
+  }
+  function closeModal() {
+    document.getElementById('scheduleModal').style.display = 'none';
+    document.body.style.overflow = '';
+  }
+  document.getElementById('scheduleModal').addEventListener('click', function(e) {
+    if (e.target === this) closeModal();
+  });
+
+  async function submitForm() {
+    const name      = document.getElementById('f_name').value.trim();
+    const institute = document.getElementById('f_institute').value.trim();
+    const size      = document.getElementById('f_size').value;
+    const mobile    = document.getElementById('f_mobile').value.trim().replace(/\s/g,'');
+    const pilot     = document.getElementById('f_pilot').checked;
+    const errEl     = document.getElementById('formError');
+
+    errEl.style.display = 'none';
+    if (!name || !institute || !size || !mobile) {
+      errEl.textContent = 'Please fill in all required fields.';
+      errEl.style.display = 'block'; return;
+    }
+    if (!/^[6-9]\d{9}$/.test(mobile)) {
+      errEl.textContent = 'Please enter a valid 10-digit Indian mobile number.';
+      errEl.style.display = 'block'; return;
+    }
+
+    const btn = document.getElementById('submitBtn');
+    btn.textContent = 'Sending…'; btn.style.opacity = '0.7'; btn.disabled = true;
+
+    // Send to backend for email notification
+    try {
+      await fetch('/api/demo-request', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, institute, size, mobile, pilot }),
+      });
+    } catch(e) { /* non-fatal */ }
+
+    // Open WhatsApp with pre-filled message
+    // ⚠️ REPLACE the number below with YOUR WhatsApp number (country code + number, no +)
+    const YOUR_WHATSAPP = '918360859476';
+    const msg = encodeURIComponent(
+      `📋 *New Demo Request — InquiAI*\n\n` +
+      `👤 *Name:* ${name}\n` +
+      `🏫 *Institute:* ${institute}\n` +
+      `👥 *Size:* ${size}\n` +
+      `📱 *Mobile:* ${mobile}\n` +
+      `🎯 *Pilot Trial:* ${pilot ? 'Yes, interested ✅' : 'Not sure yet'}`
+    );
+    window.open(`https://wa.me/${YOUR_WHATSAPP}?text=${msg}`, '_blank');
+
+    btn.textContent = '✅ Sent! Opening WhatsApp…'; btn.style.opacity = '1';
+    setTimeout(() => {
+      closeModal();
+      btn.textContent = '📲 Send My Details →'; btn.disabled = false;
+    }, 2500);
+  }
+</script>
 
 <!-- Footer -->
 <footer>

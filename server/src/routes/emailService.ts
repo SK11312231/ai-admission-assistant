@@ -353,7 +353,7 @@ export async function sendPasswordResetEmail(opts: {
     resetUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
   } = opts;
 
-  const resetLink = `${resetUrl}reset-password?token=${resetToken}`;
+  const resetLink = `${resetUrl}/reset-password?token=${resetToken}`;
 
   const body = `
     <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">🔑 Reset Your Password</h2>
@@ -434,4 +434,38 @@ export async function sendUpgradeRequestEmail(opts: {
   });
 
   console.log(`[Email] Upgrade request sent to ${adminEmail} for: ${instituteName}`);
+}
+// ── 8. Demo Request Notification ─────────────────────────────────────────────
+
+export async function sendDemoRequestEmail(opts: {
+  adminEmail: string;
+  name: string;
+  institute: string;
+  size: string;
+  mobile: string;
+  pilot: boolean;
+}): Promise<void> {
+  const { adminEmail, name, institute, size, mobile, pilot } = opts;
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">📞 New Demo Request</h2>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">Someone requested a call from the InquiAI demo page.</p>
+    ${infoBox(`
+      <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1f2937;">🏫 ${institute}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#374151;">👤 <strong>Name:</strong> ${name}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#374151;">📱 <strong>Mobile:</strong> ${mobile}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#374151;">👥 <strong>Institute Size:</strong> ${size}</p>
+      <p style="margin:0;font-size:13px;color:#374151;">🎯 <strong>Free Pilot:</strong> ${pilot ? 'Yes, interested ✅' : 'Not sure yet'}</p>
+    `, '#10b981')}
+    <p style="color:#6b7280;font-size:13px;margin-top:16px;">Reply to this lead within 2 hours for best conversion.</p>
+    ${ctaButton(`WhatsApp ${name} →`, `https://wa.me/91${mobile}`)}
+  `;
+
+  await sendEmail({
+    to: adminEmail,
+    subject: `📞 Demo Request: ${name} from ${institute}`,
+    html: baseTemplate('New Demo Request', body),
+  });
+
+  console.log(`[Email] Demo request notification sent for: ${name} (${institute})`);
 }

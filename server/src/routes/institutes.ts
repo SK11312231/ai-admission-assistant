@@ -137,6 +137,41 @@ router.post('/register', async (req: Request, res: Response) => {
   }
 });
 
+// POST /api/demo-request
+// Receives demo call request from the public demo page and sends email notification.
+router.post('/demo-request', async (req: Request, res: Response) => {
+  const { name, institute, size, mobile, pilot } = req.body as {
+    name?: string;
+    institute?: string;
+    size?: string;
+    mobile?: string;
+    pilot?: boolean;
+  };
+
+  // Always respond 200 — don't block the WhatsApp redirect
+  res.json({ success: true });
+
+  if (!name || !institute || !mobile) return;
+
+  try {
+    const { sendDemoRequestEmail } = await import('./emailService');
+    const adminEmail = process.env.ADMIN_EMAIL ?? process.env.EMAIL_USER ?? '';
+    if (adminEmail) {
+      await sendDemoRequestEmail({
+        adminEmail,
+        name: name.trim(),
+        institute: institute.trim(),
+        size: size ?? 'Not specified',
+        mobile: mobile.trim(),
+        pilot: pilot ?? false,
+      });
+    }
+    console.log(`[Demo] Request from ${name} (${institute}) — ${mobile}`);
+  } catch (err) {
+    console.error('[Demo] Email notification failed:', err);
+  }
+});
+
 // POST /api/institutes/login
 router.post('/login', async (req: Request, res: Response) => {
   const { email, password } = req.body as { email?: string; password?: string };
