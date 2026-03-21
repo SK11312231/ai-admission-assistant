@@ -477,7 +477,7 @@ export async function initSession(instituteId: string): Promise<void> {
           child: () => ({} as any),
         }),
       } as any,
-      browser: ['InquiAI', 'Chrome', '120.0'],
+      browser: ['Ubuntu', 'Chrome', '22.0.0'],
       connectTimeoutMs: 60_000,
       retryRequestDelayMs: 500,
       maxMsgRetryCount: 3,
