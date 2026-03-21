@@ -1,29 +1,4 @@
-/**
- * whatsappManager.ts — Baileys-based WhatsApp session manager
- *
- * Replaces the previous whatsapp-web.js + Puppeteer implementation.
- * Baileys uses a direct WebSocket connection to WhatsApp — no Chromium needed.
- * This is stable, lightweight, and works perfectly on Railway.
- *
- * Baileys is ESM-only. Since this server compiles to CommonJS, we use a
- * dynamic import() wrapper to load it at runtime — fully supported in Node 20.
- */
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type BaileysModule = any;
-
-let _baileys: BaileysModule | null = null;
-async function getBaileys(): Promise<BaileysModule> {
-  if (!_baileys) {
-    // Use new Function to bypass TypeScript's CommonJS transform of dynamic import.
-    // TypeScript converts `await import(...)` to `require(...)` when targeting CommonJS,
-    // which breaks ESM-only packages like Baileys. This trick forces a true ESM dynamic import.
-    // eslint-disable-next-line @typescript-eslint/no-implied-eval
-    _baileys = await (new Function('return import("@whiskeysockets/baileys")')() as Promise<BaileysModule>);
-  }
-  return _baileys;
-}
-
+import { Client, LocalAuth, Message } from 'whatsapp-web.js';
 import OpenAI from 'openai';
 import pool from '../db';
 import { isNumberBlocked } from './blocklist';
@@ -36,8 +11,7 @@ import { getPersonalityProfile, getRelevantExamples } from './chatTraining';
 export type WAStatus = 'initializing' | 'qr' | 'connected' | 'disconnected';
 
 interface SessionState {
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  socket: any | null;
+  client: Client;
   qr: string | null;
   status: WAStatus;
 }
@@ -52,22 +26,36 @@ interface MessageRow {
 const sessions = new Map<string, SessionState>();
 const initLocks = new Set<string>();
 
-// ── OpenAI client ─────────────────────────────────────────────────────────────
+// ── GPT-4o-mini client ───────────────────────────────────────────────────────
+// Switched from Groq/Llama to GPT-4o-mini:
+//   1. No rate limit 429 errors — Groq free tier was throttling when multiple
+//      students messaged simultaneously, causing the fallback loop bug
+//   2. Single API call — classifier + reply merged into one call (half the usage)
+//   3. Better instruction following for CLOSING/LOOP states
+//   4. Better Hindi/Hinglish support for Indian students
 
 let openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
   if (!openai) {
     if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set.');
-    openai = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+    openai = new OpenAI({
+      apiKey: process.env.OPENAI_API_KEY,
+      baseURL: 'https://api.openai.com/v1',
+    });
   }
   return openai;
 }
 
-// ── Spam filter ───────────────────────────────────────────────────────────────
+// ── Save lead ────────────────────────────────────────────────────────────────
 
 const SPAM_PATTERNS = [
-  /@lid$/, /@newsletter$/, /paymentredirect/i, /policybazaar/i,
-  /insuremile/i, /type \*#\*/i, /restart your journey/i,
+  /@lid$/,
+  /@newsletter$/,
+  /paymentredirect/i,
+  /policybazaar/i,
+  /insuremile/i,
+  /type \*#\*/i,
+  /restart your journey/i,
 ];
 
 function isSpam(phone: string, message: string): boolean {
@@ -76,15 +64,16 @@ function isSpam(phone: string, message: string): boolean {
   return /^https?:\/\/\S+$/.test(message.trim());
 }
 
-// ── Save lead ─────────────────────────────────────────────────────────────────
-
-async function saveLead(instituteId: number, studentPhone: string, message: string): Promise<void> {
+async function saveLead(
+  instituteId: number,
+  studentPhone: string,
+  message: string,
+): Promise<void> {
   try {
     if (isSpam(studentPhone, message)) {
       console.log(`[WA] Spam detected, skipping: ${studentPhone}`);
       return;
     }
-
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS notes TEXT`);
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_date TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ DEFAULT NOW()`);
@@ -102,14 +91,14 @@ async function saveLead(instituteId: number, studentPhone: string, message: stri
       return;
     }
 
-    // Extract student name
+    // New lead — name extraction (runs after reply to avoid concurrent API calls)
     let studentName: string | null = null;
     try {
       const client = getOpenAI();
       const completion = await client.chat.completions.create({
         model: 'gpt-4o-mini',
         messages: [
-          { role: 'system', content: 'Extract the student name from the message. Reply ONLY the name, or NULL if not found.' },
+          { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
           { role: 'user', content: message },
         ],
         temperature: 0,
@@ -126,7 +115,6 @@ async function saveLead(instituteId: number, studentPhone: string, message: stri
     );
     console.log(`[WA] New lead: ${studentPhone}, name: ${studentName ?? 'unknown'}`);
 
-    // Send notification email
     void (async () => {
       try {
         const instResult = await pool.query('SELECT name, email FROM institutes WHERE id = $1', [instituteId]);
@@ -149,7 +137,15 @@ async function saveLead(instituteId: number, studentPhone: string, message: stri
   }
 }
 
-// ── Build system prompt ───────────────────────────────────────────────────────
+// ── Build system prompt (single-call architecture) ───────────────────────────
+//
+// The prompt asks GPT-4o-mini to:
+//   1. Detect the conversation state from the history
+//   2. Follow the matching state instruction
+//   3. Output: first line = "STATE: X", remaining lines = the reply
+//
+// This replaces the previous two-call architecture (classifier + reply).
+// One call = no race conditions, no rate limit issues from concurrent calls.
 
 async function buildSystemPrompt(
   instituteId: number,
@@ -180,6 +176,7 @@ async function buildSystemPrompt(
       ? `Direct them: "Please visit ${website} to book your free demo, or share your phone number and our team will call you back."`
       : `Direct them: "Please share your phone number and our team will call you back to schedule your demo."`;
 
+    // Training data: personality profile + relevant past examples
     const [personality, relevantExamples] = await Promise.all([
       getPersonalityProfile(instituteId),
       getRelevantExamples(instituteId, studentMessage, 4),
@@ -196,26 +193,32 @@ async function buildSystemPrompt(
       personalitySection =
         `\n\n---\n\nCOUNSELOR STYLE (learned from real conversations — follow this):\n\n` +
         `${personality.profile}${langNote}`;
+      console.log(`[WA] Personality injected (${personality.languageStyle})`);
     }
 
     let examplesSection = '';
     if (relevantExamples.length > 0) {
       const examplesText = relevantExamples
-        .map((ex, i) => `[Example ${i + 1}]\nStudent: ${ex.studentMessage}\nCounselor: ${ex.ownerReply}`)
-        .join('\n\n');
-      examplesSection = `\n\n---\n\nREAL PAST CONVERSATIONS (match this style):\n\n${examplesText}`;
+        .map((ex, i) =>
+          `[Example ${i + 1}]\nStudent: ${ex.studentMessage}\nCounselor: ${ex.ownerReply}`,
+        ).join('\n\n');
+      examplesSection =
+        `\n\n---\n\nREAL PAST CONVERSATIONS (match this style):\n\n${examplesText}`;
+      console.log(`[WA] ${relevantExamples.length} RAG examples injected`);
     }
 
     const recentTranscript = recentHistory.slice(-6)
       .map(m => `${m.role === 'user' ? 'Student' : 'AI'}: ${m.content.slice(0, 200)}`)
       .join('\n');
 
+    // Check if student's phone number already appears in history
     const phoneAlreadyShared = recentHistory.some(m =>
       m.role === 'user' && /\b[6-9]\d{9}\b/.test(m.content),
     );
 
     return (
       `You are an AI admission assistant for ${instituteName}, responding on WhatsApp.\n\n` +
+
       `STEP 1 — READ THE CONVERSATION STATE\n` +
       `Analyse the conversation below and identify the current state:\n\n` +
       `GREETING   — first contact, student just said hi or introduced themselves\n` +
@@ -224,30 +227,56 @@ async function buildSystemPrompt(
       `CLOSING    — saying thanks, ok, bye, nice talking, done, goodbye — ending the conversation\n` +
       `LOOP       — AI already answered this same question earlier in this conversation\n` +
       `OBJECTION  — concern about price, budget, timing, not sure, needs to think\n\n` +
+
       `Recent conversation:\n${recentTranscript || '(new conversation)'}\n\n` +
+
       `STEP 2 — REPLY BASED ON STATE\n\n` +
-      `GREETING → Welcome briefly. Ask ONE open question about what they are looking for.\n\n` +
-      `EXPLORING → Answer their specific question using the institute info below. Maximum 3-4 sentences. End with ONE relevant follow-up.\n\n` +
+
+      `GREETING → Welcome briefly. Ask ONE open question about what they are looking for. Do NOT list all courses.\n\n` +
+
+      `EXPLORING → Answer their specific question using the institute info below. ` +
+      `Maximum 3-4 sentences. End with ONE relevant follow-up. Do not repeat what was said earlier.\n\n` +
+
       `BOOKING → ${bookingAction} Stop here. No more questions.\n\n` +
-      `CLOSING → 1-2 warm sentences ONLY. Do NOT ask a question. Just say goodbye.\n\n` +
-      `LOOP → Do NOT repeat the information. Give ONE clear next step and stop.\n\n` +
-      `OBJECTION → Acknowledge the concern warmly. Address it. If budget is low, suggest cheaper option or EMI.\n\n` +
+
+      `CLOSING → 1-2 warm sentences ONLY. Example: "You're welcome! Feel free to reach out anytime. 😊" ` +
+      `Do NOT ask a question. Do NOT recommend courses. Do NOT say "What brings you here". Just say goodbye.\n\n` +
+
+      `LOOP → Do NOT repeat the information. Give ONE clear next step (booking or callback) and stop.\n\n` +
+
+      `OBJECTION → Acknowledge the concern warmly in one sentence. Then address it. ` +
+      `If budget is low, suggest a cheaper course or EMI. If they need time, offer to follow up later.\n\n` +
+
       `---\n\n` +
       `${contextSection}` +
       personalitySection +
       examplesSection +
       `\n\n---\n\n` +
-      `LANGUAGE RULE: If student writes in Hindi or Hinglish, reply in Hinglish. If English, reply in English.\n\n` +
-      (phoneAlreadyShared ? `IMPORTANT: The student already shared their phone number. Do NOT ask for it again.\n\n` : '') +
-      `OUTPUT FORMAT:\nSTATE: <one word>\n<your reply>\n\n` +
-      `RULES:\n- Plain text only. No asterisks, no bullet points, no markdown.\n` +
-      `- Maximum 4 sentences.\n- One question per message maximum.\n` +
+
+      `LANGUAGE RULE:\n` +
+      `If the student writes in Hindi or Hinglish, reply in Hinglish naturally. ` +
+      `If they write in English, reply in English. Match their style.\n\n` +
+
+      (phoneAlreadyShared ? `IMPORTANT: The student already shared their phone number in this conversation. Do NOT ask for it again.\n\n` : '') +
+
+      `OUTPUT FORMAT (follow exactly):\n` +
+      `STATE: <one word>\n` +
+      `<your reply>\n\n` +
+
+      `RULES:\n` +
+      `- Plain text only. No asterisks, no bullet points, no markdown.\n` +
+      `- Maximum 4 sentences. This is WhatsApp on a phone.\n` +
+      `- One question per message maximum.\n` +
       `- Never repeat information already in this conversation.\n` +
       `- Never invent fees, dates, or details not in the institute info above.`
     );
   } catch (err) {
     console.error(`[WA] buildSystemPrompt failed:`, err);
-    return `You are a helpful AI admission assistant. Reply warmly in plain text.\nFirst line must be: STATE: EXPLORING\nThen write your reply.`;
+    return (
+      `You are a helpful AI admission assistant. Reply warmly in plain text.\n` +
+      `First line must be: STATE: EXPLORING\n` +
+      `Then write your reply.`
+    );
   }
 }
 
@@ -267,6 +296,7 @@ export async function getAIReply(
       [sessionId],
     );
     const history = historyResult.rows as MessageRow[];
+    console.log(`[WA] History: ${history.length} messages`);
 
     await pool.query(
       'INSERT INTO messages (session_id, role, content) VALUES ($1, $2, $3)',
@@ -275,12 +305,13 @@ export async function getAIReply(
 
     const systemPrompt = await buildSystemPrompt(instituteId, messageText, history);
 
+    console.log(`[WA] Calling GPT-4o-mini...`);
     const client = getOpenAI();
     const completion = await client.chat.completions.create({
       model: 'gpt-4o-mini',
       messages: [
         { role: 'system', content: systemPrompt },
-        ...history.map(m => ({ role: m.role, content: m.content })),
+        ...history.map((m) => ({ role: m.role, content: m.content })),
         { role: 'user', content: messageText.trim() },
       ],
       temperature: 0.7,
@@ -290,6 +321,7 @@ export async function getAIReply(
     const rawOutput = completion.choices[0]?.message?.content?.trim() ?? '';
     if (!rawOutput) return null;
 
+    // Parse STATE from first line, reply from the rest
     const lines = rawOutput.split('\n').filter(l => l.trim() !== '');
     const firstLine = lines[0]?.trim() ?? '';
     let detectedState = 'EXPLORING';
@@ -298,12 +330,17 @@ export async function getAIReply(
     if (firstLine.toUpperCase().startsWith('STATE:')) {
       detectedState = firstLine.replace(/^STATE:\s*/i, '').trim().toUpperCase();
       reply = lines.slice(1).join('\n').trim();
-      if (!reply) reply = rawOutput;
+      if (!reply) reply = rawOutput; // fallback if model put everything on one line
     }
 
-    console.log(`[WA] State: ${detectedState} | Reply: ${reply.slice(0, 100)}`);
+    console.log(`[WA] State: ${detectedState} | Reply (${reply.length} chars): ${reply.slice(0, 100)}`);
 
-    const charLimits: Record<string, number> = { CLOSING: 180, LOOP: 250, BOOKING: 280 };
+    // Hard character limits per state to prevent walls of text
+    const charLimits: Record<string, number> = {
+      CLOSING: 180,
+      LOOP: 250,
+      BOOKING: 280,
+    };
     const limit = charLimits[detectedState];
     const finalReply = limit && reply.length > limit
       ? reply.slice(0, reply.lastIndexOf(' ', limit)) + '.'
@@ -321,7 +358,174 @@ export async function getAIReply(
   }
 }
 
-// ── Send message to student ───────────────────────────────────────────────────
+// ── Puppeteer client factory ─────────────────────────────────────────────────
+
+function makeClient(instituteId: string): Client {
+  return new Client({
+    authStrategy: new LocalAuth({ clientId: `institute-${instituteId}` }),
+    webVersionCache: { type: 'none' },
+    puppeteer: {
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--disable-gpu',
+        '--disable-software-rasterizer',
+        '--disable-extensions',
+        '--disable-features=site-per-process',  // ← replaces --single-process
+        '--disable-web-security',
+        '--allow-running-insecure-content',
+      ],
+      executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+      headless: true,
+      timeout: 60000,
+    },
+  });
+}
+
+// ── Init session ─────────────────────────────────────────────────────────────
+
+export async function initSession(instituteId: string): Promise<void> {
+  if (initLocks.has(instituteId)) {
+    console.log(`[WA] initSession skipped — already initializing ${instituteId}`);
+    return;
+  }
+
+  const existing = sessions.get(instituteId);
+  if (existing?.status === 'connected') return;
+  if (existing?.status === 'initializing' || existing?.status === 'qr') return;
+
+  initLocks.add(instituteId);
+
+  console.log(`[WA] Initializing session for institute ${instituteId}`);
+  const client = makeClient(instituteId);
+  const state: SessionState = { client, qr: null, status: 'initializing' };
+  sessions.set(instituteId, state);
+
+  let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
+
+  client.on('qr', (qr) => {
+    state.qr = qr;
+    state.status = 'qr';
+    console.log(`[WA] QR received for institute ${instituteId}`);
+  });
+
+  client.on('loading_screen', (percent, message) => {
+    console.log(`[WA] Loading institute ${instituteId}: ${percent}% — ${message}`);
+  });
+
+  client.on('authenticated', () => {
+    if (watchdogTimer !== null) return; // guard — fires once per linked device
+    console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
+
+    void (client as unknown as { pupPage?: { on?: (e: string, cb: (err: Error) => void) => void } })
+      .pupPage?.on?.('pageerror', (err: Error) => {
+        console.error(`[WA] Page error for institute ${instituteId}:`, err.message?.slice(0, 200));
+      });
+
+    watchdogTimer = setTimeout(() => {
+      console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s.`);
+      void state.client.destroy().catch(() => { /* ignore */ });
+      sessions.delete(instituteId);
+      initLocks.delete(instituteId);
+      void pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+    }, 90_000);
+  });
+
+  client.on('ready', async () => {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+    state.qr = null;
+    state.status = 'connected';
+    initLocks.delete(instituteId);
+    console.log(`[WA] ✅ Client READY for institute ${instituteId}`);
+    await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
+  });
+
+  client.on('disconnected', async (reason) => {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+    state.status = 'disconnected';
+    initLocks.delete(instituteId);
+    console.log(`[WA] Disconnected institute ${instituteId}: ${reason}`);
+    await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+  });
+
+  client.on('auth_failure', (msg) => {
+    if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
+    state.status = 'disconnected';
+    initLocks.delete(instituteId);
+    console.error(`[WA] Auth failure for institute ${instituteId}:`, msg);
+  });
+
+  client.on('message', async (msg: Message) => {
+    if (msg.fromMe) return;
+    if (msg.from.endsWith('@g.us')) return;
+    if (msg.from.endsWith('@newsletter')) return;
+    if (msg.from.endsWith('@lid')) return;
+    if (msg.from === 'status@broadcast') return;
+    if (!msg.body || msg.body.trim() === '') return;
+
+    const phoneClean = msg.from.replace('@c.us', '').replace(/[\s\-\+]/g, '');
+    if (await isNumberBlocked(Number(instituteId), phoneClean)) {
+      console.log(`[WA] Blocked: ${phoneClean}`); return;
+    }
+
+    const studentPhone = msg.from.replace('@c.us', '');
+    const messageText = msg.body;
+
+    console.log(`[WA] ===== INCOMING =====`);
+    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
+
+    // Reply FIRST, saveLead AFTER — avoids concurrent API calls
+    try {
+      const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
+      if (reply) {
+        await client.sendMessage(msg.from, reply);
+        console.log(`[WA] ===== REPLY SENT =====`);
+      } else {
+        // GPT returned null — log only, no fallback
+        // The previous fallback "Thank you for contacting..." was sending on every
+        // rate-limited message, causing the repeated identical message bug.
+        // Silent failure is better than spamming the student.
+        console.error(`[WA] GPT returned null — no reply sent. Check OPENAI_API_KEY and quota.`);
+      }
+    } catch (err) {
+      console.error(`[WA] Failed to send reply:`, err);
+    }
+
+    void saveLead(Number(instituteId), studentPhone, messageText);
+  });
+
+  try {
+    await client.initialize();
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[WA] client.initialize() failed for institute ${instituteId}: ${msg}`);
+    sessions.delete(instituteId);
+    initLocks.delete(instituteId);
+    await pool.query(
+      `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
+      [Number(instituteId)]
+    );
+  }
+}
+
+// ── Exports ──────────────────────────────────────────────────────────────────
+
+export function getSessionState(instituteId: string): { status: WAStatus; qr: string | null } {
+  const s = sessions.get(instituteId);
+  return s ? { status: s.status, qr: s.qr } : { status: 'disconnected', qr: null };
+}
+
+export async function disconnectSession(instituteId: string): Promise<void> {
+  const s = sessions.get(instituteId);
+  if (!s) return;
+  try { await s.client.destroy(); } catch { /* ignore */ }
+  sessions.delete(instituteId);
+  initLocks.delete(instituteId);
+  await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+}
 
 export async function sendMessageToStudent(
   instituteId: string,
@@ -329,11 +533,9 @@ export async function sendMessageToStudent(
   message: string,
 ): Promise<boolean> {
   const s = sessions.get(instituteId);
-  if (!s || s.status !== 'connected' || !s.socket) return false;
+  if (!s || s.status !== 'connected') return false;
   try {
-    // Baileys expects JID format: 91XXXXXXXXXX@s.whatsapp.net
-    const jid = toNumber.includes('@') ? toNumber : `${toNumber}@s.whatsapp.net`;
-    await s.socket.sendMessage(jid, { text: message });
+    await s.client.sendMessage(toNumber, message);
     return true;
   } catch (err) {
     console.error(`[WA] sendMessageToStudent failed:`, err);
@@ -341,311 +543,20 @@ export async function sendMessageToStudent(
   }
 }
 
-// ── Init session ──────────────────────────────────────────────────────────────
-
-export async function initSession(instituteId: string): Promise<void> {
-  if (initLocks.has(instituteId)) return;
-
-  const existing = sessions.get(instituteId);
-  if (existing?.status === 'connected') return;
-  if (existing?.status === 'initializing' || existing?.status === 'qr') return;
-
-  initLocks.add(instituteId);
-  console.log(`[WA] Initializing Baileys session for institute ${instituteId}`);
-
-  const state: SessionState = { socket: null, qr: null, status: 'initializing' };
-  sessions.set(instituteId, state);
-
-  try {
-    const {
-      fetchLatestBaileysVersion,
-      makeCacheableSignalKeyStore,
-      default: makeWASocket,
-      DisconnectReason,
-      initAuthCreds,
-    } = await getBaileys();
-
-    // ── DB-backed auth state ──────────────────────────────────────────────
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS baileys_auth (
-        institute_id INTEGER NOT NULL,
-        key_id       TEXT NOT NULL,
-        key_data     TEXT NOT NULL,
-        PRIMARY KEY  (institute_id, key_id)
-      )
-    `);
-
-    // Replacer: converts Uint8Array/Buffer → {type:'Buffer',data:[...]} for DB storage
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bufferReplacer = (_: string, val: any) => {
-      if (val instanceof Uint8Array || Buffer.isBuffer(val)) {
-        return { type: 'Buffer', data: Array.from(val as Uint8Array) };
-      }
-      return val;
-    };
-
-    // Reviver: converts {type:'Buffer',data:[...]} back to Uint8Array on read
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const bufferReviver = (_: string, val: any) => {
-      if (val && typeof val === 'object' && val.type === 'Buffer' && Array.isArray(val.data)) {
-        return new Uint8Array(val.data);
-      }
-      return val;
-    };
-
-    const readData = async (keyId: string) => {
-      const result = await pool.query(
-        'SELECT key_data FROM baileys_auth WHERE institute_id = $1 AND key_id = $2',
-        [Number(instituteId), keyId],
-      );
-      if (!result.rows[0]) return null;
-      return JSON.parse(result.rows[0].key_data, bufferReviver);
-    };
-
-    const writeData = async (keyId: string, data: unknown) => {
-      const json = JSON.stringify(data, bufferReplacer);
-      await pool.query(
-        `INSERT INTO baileys_auth (institute_id, key_id, key_data)
-         VALUES ($1, $2, $3)
-         ON CONFLICT (institute_id, key_id)
-         DO UPDATE SET key_data = EXCLUDED.key_data`,
-        [Number(instituteId), keyId, json],
-      );
-    };
-
-    const removeData = async (keyId: string) => {
-      await pool.query(
-        'DELETE FROM baileys_auth WHERE institute_id = $1 AND key_id = $2',
-        [Number(instituteId), keyId],
-      );
-    };
-
-    const creds = (await readData('creds')) ?? initAuthCreds();
-
-    const authState = {
-      creds,
-      keys: {
-        get: async (type: string, ids: string[]) => {
-          const data: Record<string, unknown> = {};
-          await Promise.all(ids.map(async (id) => {
-            const val = await readData(`${type}-${id}`);
-            if (val) data[id] = val;
-          }));
-          return data;
-        },
-        set: async (data: Record<string, Record<string, unknown>>) => {
-          await Promise.all(
-            Object.entries(data).flatMap(([type, entries]) =>
-              Object.entries(entries).map(([id, val]) =>
-                val != null
-                  ? writeData(`${type}-${id}`, val)
-                  : removeData(`${type}-${id}`),
-              ),
-            ),
-          );
-        },
-      },
-    };
-
-    const saveCreds = async () => { await writeData('creds', authState.creds); };
-
-    const { version } = await fetchLatestBaileysVersion();
-
-    const sock = makeWASocket({
-      version,
-      auth: {
-        creds: authState.creds,
-        keys: makeCacheableSignalKeyStore(authState.keys, {
-          level: 'silent',
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any),
-      },
-      printQRInTerminal: false,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      logger: {
-        level: 'silent',
-        trace: () => {},
-        debug: () => {},
-        info: () => {},
-        warn: (msg: unknown) => console.warn('[Baileys]', msg),
-        error: (msg: unknown) => console.error('[Baileys]', msg),
-        fatal: (msg: unknown) => console.error('[Baileys FATAL]', msg),
-        child: () => ({
-          level: 'silent',
-          trace: () => {}, debug: () => {}, info: () => {},
-          warn: () => {}, error: () => {}, fatal: () => {},
-          child: () => ({} as any),
-        }),
-      } as any,
-      browser: ['Ubuntu', 'Chrome', '22.0.0'],
-      connectTimeoutMs: 60_000,
-      retryRequestDelayMs: 500,
-      maxMsgRetryCount: 3,
-    });
-
-    state.socket = sock;
-
-    // ── Connection updates ──────────────────────────────────────────────────
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sock.ev.on('connection.update', async (update: any) => {
-      const { connection, lastDisconnect, qr } = update;
-
-      if (qr) {
-        state.qr = qr;
-        state.status = 'qr';
-        console.log(`[WA] QR received for institute ${instituteId}`);
-      }
-
-      if (connection === 'open') {
-        state.qr = null;
-        state.status = 'connected';
-        initLocks.delete(instituteId);
-        console.log(`[WA] ✅ Baileys connected for institute ${instituteId}`);
-        await pool.query(
-          `UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`,
-          [Number(instituteId)],
-        );
-      }
-
-      if (connection === 'close') {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const statusCode = (lastDisconnect?.error as any)?.output?.statusCode;
-        const shouldReconnect = statusCode !== DisconnectReason.loggedOut && statusCode !== 515;
-
-        console.log(`[WA] Connection closed for institute ${instituteId}. Code: ${statusCode}. Reconnect: ${shouldReconnect}`);
-
-        if (statusCode === DisconnectReason.loggedOut) {
-          // User logged out — clear auth and mark disconnected
-          state.status = 'disconnected';
-          state.socket = null;
-          initLocks.delete(instituteId);
-          sessions.delete(instituteId);
-          await pool.query(
-            `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
-            [Number(instituteId)],
-          );
-          console.log(`[WA] Institute ${instituteId} logged out — session cleared.`);
-        } else if (shouldReconnect) {
-          // Network blip — auto-reconnect
-          state.status = 'disconnected';
-          initLocks.delete(instituteId);
-          console.log(`[WA] Auto-reconnecting institute ${instituteId} in 5s...`);
-          setTimeout(() => void initSession(instituteId), 5000);
-        } else {
-          state.status = 'disconnected';
-          state.socket = null;
-          initLocks.delete(instituteId);
-          await pool.query(
-            `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
-            [Number(instituteId)],
-          );
-        }
-      }
-    });
-
-    // ── Save credentials on update ──────────────────────────────────────────
-    sock.ev.on('creds.update', saveCreds);
-
-    // ── Incoming messages ───────────────────────────────────────────────────
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    sock.ev.on('messages.upsert', async ({ messages: msgs, type }: { messages: any[]; type: any }) => {
-      if (type !== 'notify') return;
-
-      for (const msg of msgs) {
-        if (msg.key.fromMe) continue;
-        if (!msg.key.remoteJid) continue;
-
-        // Skip group messages
-        if (msg.key.remoteJid.endsWith('@g.us')) continue;
-
-        // Extract text
-        const messageText =
-          msg.message?.conversation ||
-          msg.message?.extendedTextMessage?.text ||
-          msg.message?.imageMessage?.caption ||
-          '';
-
-        if (!messageText.trim()) continue;
-
-        // Clean phone number — remove @s.whatsapp.net and country code formatting
-        const studentPhone = msg.key.remoteJid.replace('@s.whatsapp.net', '');
-
-        console.log(`[WA] ===== INCOMING =====`);
-        console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
-
-        // Check blocklist
-        const phoneClean = studentPhone.replace(/[\s\-\+]/g, '');
-        if (await isNumberBlocked(Number(instituteId), phoneClean)) {
-          console.log(`[WA] Blocked: ${phoneClean}`);
-          continue;
-        }
-
-        // Reply first, save lead after
-        try {
-          const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
-          if (reply && state.socket) {
-            await state.socket.sendMessage(msg.key.remoteJid, { text: reply });
-            console.log(`[WA] ===== REPLY SENT =====`);
-          } else if (!reply) {
-            console.error(`[WA] AI returned null — no reply sent.`);
-          }
-        } catch (err) {
-          console.error(`[WA] Failed to send reply:`, err);
-        }
-
-        void saveLead(Number(instituteId), studentPhone, messageText);
-      }
-    });
-
-  } catch (err) {
-    console.error(`[WA] initSession failed for institute ${instituteId}:`, err);
-    state.status = 'disconnected';
-    initLocks.delete(instituteId);
-    await pool.query(
-      `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
-      [Number(instituteId)],
-    ).catch(() => {});
-  }
-}
-
-// ── Get session state (with QR as data URL) ───────────────────────────────────
-
-export function getSessionState(instituteId: string): { status: WAStatus; qr: string | null } {
-  const s = sessions.get(instituteId);
-  if (!s) return { status: 'disconnected', qr: null };
-  return { status: s.status, qr: s.qr };
-}
-
-// ── Disconnect session ────────────────────────────────────────────────────────
-
-export async function disconnectSession(instituteId: string): Promise<void> {
-  const s = sessions.get(instituteId);
-  if (!s) return;
-  try {
-    if (s.socket) await s.socket.logout();
-  } catch { /* ignore */ }
-  sessions.delete(instituteId);
-  initLocks.delete(instituteId);
-  await pool.query(
-    `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
-    [Number(instituteId)],
-  );
-}
-
-// ── Restore sessions on startup ───────────────────────────────────────────────
-
 export async function restoreAllSessions(): Promise<void> {
   try {
     const result = await pool.query(`SELECT id FROM institutes WHERE whatsapp_connected = TRUE`);
     const ids: number[] = result.rows.map((r: { id: number }) => r.id);
-    console.log(`[WA] Restoring ${ids.length} Baileys session(s)...`);
+    console.log(`[WA] Restoring ${ids.length} session(s)...`);
     for (const id of ids) {
+      // Stagger session restores — don't launch all Chromium instances simultaneously
       await new Promise(resolve => setTimeout(resolve, 3000));
       void initSession(String(id)).catch(err => {
         console.error(`[WA] Session restore failed for institute ${id}:`, err);
       });
-    }
-  } catch (err) {
+    } 
+  }
+  catch (err) {
     console.error('[WA] restoreAllSessions failed:', err);
   }
 }
