@@ -72,7 +72,7 @@ type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'trainin
 function getTrialDaysLeft(createdAt: string): number {
   const created = new Date(createdAt).getTime();
   const daysUsed = Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24));
-  return Math.max(0, 30 - daysUsed);
+  return Math.max(0, 14 - daysUsed);
 }
 
 function isTrialExpired(createdAt: string): boolean {
@@ -89,7 +89,7 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 function isPremium(plan: string): boolean {
-  return ['advanced', 'pro'].includes(plan.toLowerCase());
+  return ['growth', 'pro'].includes(plan.toLowerCase());
 }
 
 function isOverdue(date: string | null): boolean {
@@ -469,7 +469,7 @@ export default function Dashboard() {
   };
 
   // ── Request plan upgrade ────────────────────────────────────────────────────
-  const handleRequestUpgrade = async (plan: 'advanced' | 'pro') => {
+  const handleRequestUpgrade = async (plan: 'growth' | 'pro') => {
     if (!institute) return;
     setUpgrading(true);
     setUpgradeError(null);
@@ -509,7 +509,7 @@ export default function Dashboard() {
   // Premium features accessible during trial OR on paid plan
   const premiumUnlocked = isPaid || !trialExpired;
   const trialPercent = institute.created_at
-    ? Math.min(100, Math.round(((30 - trialLeft) / 30) * 100))
+    ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
     : 0;
 
   // Nav items config
@@ -660,31 +660,30 @@ export default function Dashboard() {
                   <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{upgradeError}</div>
                 )}
                 <div className="grid sm:grid-cols-2 gap-4">
-                  {/* Advanced */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'advanced' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
+                  {/* Growth */}
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'growth' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Advanced</span>
-                      {institute.plan === 'advanced' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
-                      {pendingUpgrade?.requested_plan === 'advanced' && institute.plan !== 'advanced' && (
+                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Growth</span>
+                      {institute.plan === 'growth' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {pendingUpgrade?.requested_plan === 'growth' && institute.plan !== 'growth' && (
                         <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
                       )}
                     </div>
                     <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹1,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹2,999</span>
+                      <span className="text-2xl font-extrabold text-gray-900">₹3,999</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <p className="text-xs text-gray-500 mb-3">per month · ₹39,990/year</p>
                     <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Unlimited leads', 'Analytics dashboard', 'Leads over time & peak hour charts', 'Conversion rate tracking', 'Embeddable chat widget', 'AI Training'].map(f => (
+                      {['2 WhatsApp numbers', '2,000 AI responses/month', 'Unlimited active leads', 'AI Training (chat history)', 'Advanced analytics', 'Follow-up sequences'].map(f => (
                         <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
                           <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
                         </li>
                       ))}
                     </ul>
-                    <button onClick={() => void handleRequestUpgrade('advanced')}
-                      disabled={upgrading || institute.plan === 'advanced' || institute.plan === 'pro' || !!pendingUpgrade}
+                    <button onClick={() => void handleRequestUpgrade('growth')}
+                      disabled={upgrading || institute.plan === 'growth' || institute.plan === 'pro' || !!pendingUpgrade}
                       className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                      {upgrading ? 'Submitting…' : institute.plan === 'advanced' ? 'Current Plan' : institute.plan === 'pro' ? 'Already on Pro' : pendingUpgrade?.requested_plan === 'advanced' ? '⏳ Pending' : pendingUpgrade ? 'Another Request Pending' : 'Request Upgrade →'}
+                      {upgrading ? 'Submitting…' : institute.plan === 'growth' ? 'Current Plan' : institute.plan === 'pro' ? 'Already on Pro' : pendingUpgrade?.requested_plan === 'growth' ? '⏳ Pending' : pendingUpgrade ? 'Another Request Pending' : 'Request Upgrade →'}
                     </button>
                   </div>
                   {/* Pro */}
@@ -697,12 +696,11 @@ export default function Dashboard() {
                       )}
                     </div>
                     <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹3,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹4,599</span>
+                      <span className="text-2xl font-extrabold text-gray-900">₹8,999</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <p className="text-xs text-gray-500 mb-3">per month · ₹89,990/year</p>
                     <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Everything in Advanced', 'Multi-institute admin panel', 'Team accounts & roles', 'Custom AI prompt config', 'API access', 'Dedicated onboarding'].map(f => (
+                      {['Unlimited WhatsApp numbers', 'Unlimited AI responses', 'Multi-branch dashboard', 'Custom AI persona training', 'Bulk broadcast messaging', 'Dedicated onboarding call'].map(f => (
                         <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
                           <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
                         </li>
@@ -794,7 +792,7 @@ export default function Dashboard() {
           <div style={{ margin: '14px 10px 0', background: '#0e0d17', border: '1px solid #1e1c30', borderRadius: '10px', padding: '12px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
               <span style={{ fontSize: '11px', fontWeight: 500, color: '#8884a0' }}>
-                {trialExpired ? 'Trial ended' : 'Free trial'}
+                {trialExpired ? 'Trial ended' : '14-day trial'}
               </span>
               <span style={{ fontSize: '10px', color: trialExpired ? '#a32d2d' : '#4a4768' }}>
                 {trialExpired ? 'Expired' : `${trialLeft}d left`}
@@ -970,34 +968,33 @@ export default function Dashboard() {
 
                 <div className="grid sm:grid-cols-2 gap-4">
                   {/* Advanced */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'advanced' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'growth' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Advanced</span>
-                      {institute.plan === 'advanced' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
-                      {pendingUpgrade?.requested_plan === 'advanced' && institute.plan !== 'advanced' && (
+                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Growth</span>
+                      {institute.plan === 'growth' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {pendingUpgrade?.requested_plan === 'growth' && institute.plan !== 'growth' && (
                         <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
                       )}
                     </div>
                     <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹1,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹2,999</span>
+                      <span className="text-2xl font-extrabold text-gray-900">₹3,999</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <p className="text-xs text-gray-500 mb-3">per month · ₹39,990/year</p>
                     <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Unlimited leads', 'Analytics dashboard', 'Leads over time & peak hour charts', 'Conversion rate tracking', 'Embeddable chat widget'].map(f => (
+                      {['2 WhatsApp numbers', '2,000 AI responses/month', 'Unlimited active leads', 'AI Training (chat history)', 'Advanced analytics'].map(f => (
                         <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
                           <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
                         </li>
                       ))}
                     </ul>
                     <button
-                      onClick={() => void handleRequestUpgrade('advanced')}
-                      disabled={upgrading || institute.plan === 'advanced' || institute.plan === 'pro' || !!pendingUpgrade}
+                      onClick={() => void handleRequestUpgrade('growth')}
+                      disabled={upgrading || institute.plan === 'growth' || institute.plan === 'pro' || !!pendingUpgrade}
                       className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
                       {upgrading ? 'Submitting…'
-                        : institute.plan === 'advanced' ? 'Current Plan'
+                        : institute.plan === 'growth' ? 'Current Plan'
                         : institute.plan === 'pro' ? 'Already on Pro'
-                        : pendingUpgrade?.requested_plan === 'advanced' ? '⏳ Request Pending'
+                        : pendingUpgrade?.requested_plan === 'growth' ? '⏳ Request Pending'
                         : pendingUpgrade ? 'Another Request Pending'
                         : 'Request Upgrade →'}
                     </button>
@@ -1013,12 +1010,11 @@ export default function Dashboard() {
                       )}
                     </div>
                     <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹3,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹4,599</span>
+                      <span className="text-2xl font-extrabold text-gray-900">₹8,999</span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <p className="text-xs text-gray-500 mb-3">per month · ₹89,990/year</p>
                     <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Everything in Advanced', 'Multi-institute admin panel', 'Team accounts & roles', 'Custom AI prompt config', 'API access', 'Dedicated onboarding'].map(f => (
+                      {['Unlimited WhatsApp numbers', 'Unlimited AI responses', 'Multi-branch dashboard', 'Custom AI persona training', 'Bulk broadcast messaging', 'Dedicated onboarding call'].map(f => (
                         <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
                           <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
                         </li>
@@ -1282,7 +1278,7 @@ export default function Dashboard() {
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📊</div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Analytics is an Advanced Feature</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Advanced plan</span> to unlock
+                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to unlock
                 lead trends, peak hour insights, conversion tracking, and more.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
@@ -1303,9 +1299,9 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Advanced — ₹1,499/month →
+                Upgrade to Growth — ₹3,999/month →
               </button>
-              <p className="text-xs text-gray-400 mt-3">Original price ₹2,999/month · Launch discount applied</p>
+              <p className="text-xs text-gray-400 mt-3">Annual plan available at ₹39,990/year — save 2 months</p>
             </div>
           ) : analyticsLoading ? (
             <div className="text-center py-20">
@@ -1571,9 +1567,9 @@ export default function Dashboard() {
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">💬</div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is an Advanced Feature</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is a Growth Feature</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Advanced plan</span> to embed
+                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to embed
                 an AI-powered chat widget directly on your institute's website.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
@@ -1594,7 +1590,7 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Advanced — ₹1,499/month →
+                Upgrade to Growth — ₹3,999/month →
               </button>
             </div>
           ) : (
