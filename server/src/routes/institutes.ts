@@ -65,8 +65,8 @@ router.post('/register', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'WhatsApp number is required.' });
     return;
   }
-  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
+  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be one of: starter, growth, pro.' });
     return;
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
@@ -308,8 +308,8 @@ router.patch('/:id/plan', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
 
-  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
+  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be one of: starter, growth, pro.' });
     return;
   }
 
@@ -346,23 +346,12 @@ router.post('/:id/request-upgrade', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
 
-  if (!plan || !['advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Requested plan must be advanced or pro.' });
+  if (!plan || !['growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Requested plan must be growth or pro.' });
     return;
   }
 
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS upgrade_requests (
-        id             SERIAL PRIMARY KEY,
-        institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
-        requested_plan TEXT NOT NULL,
-        status         TEXT NOT NULL DEFAULT 'pending',
-        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        resolved_at    TIMESTAMPTZ
-      )
-    `);
-
     // Fetch institute details
     const instResult = await pool.query(
       `SELECT id, name, email, phone, plan FROM institutes WHERE id = $1`,
@@ -429,17 +418,6 @@ router.post('/:id/request-upgrade', async (req: Request, res: Response) => {
 router.get('/:id/upgrade-request', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS upgrade_requests (
-        id             SERIAL PRIMARY KEY,
-        institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
-        requested_plan TEXT NOT NULL,
-        status         TEXT NOT NULL DEFAULT 'pending',
-        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-        resolved_at    TIMESTAMPTZ
-      )
-    `);
-
     const result = await pool.query(
       `SELECT id, requested_plan, status, created_at
        FROM upgrade_requests
@@ -494,17 +472,6 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
   try {
     // Ensure reset tokens table exists
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS password_reset_tokens (
-        id          SERIAL PRIMARY KEY,
-        institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
-        token       TEXT NOT NULL UNIQUE,
-        expires_at  TIMESTAMPTZ NOT NULL,
-        used        BOOLEAN NOT NULL DEFAULT FALSE,
-        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
-      )
-    `);
-
     const result = await pool.query(
       'SELECT id, name, email FROM institutes WHERE email = $1',
       [email.trim().toLowerCase()],

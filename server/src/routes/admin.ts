@@ -184,8 +184,8 @@ router.get('/institutes', async (req: Request, res: Response) => {
 router.patch('/institutes/:id/plan', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
-  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be free, advanced, or pro.' });
+  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be starter, growth, or pro.' });
     return;
   }
   try {
@@ -442,3 +442,79 @@ router.post('/admins', async (req: Request, res: Response) => {
 });
 
 export default router;
+
+// ── Plans router (exported separately) ───────────────────────────────────────
+// Mount in index.ts:
+//   import plansRouter from './routes/admin';  ← or from a dedicated plans.ts
+//   app.use('/api/plans', plansRouter);         ← public GET
+//   app.use('/api/admin/plans', verifyAdmin, adminPlansRouter); ← protected PATCH
+
+import { Router as PlansRouter } from 'express';
+export const plansRouter = PlansRouter();
+
+// GET /api/plans — public, used by Home.tsx and Register.tsx on load
+plansRouter.get('/', async (_req: Request, res: Response) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, slug, name, badge, price_monthly, price_annual,
+              description, features, limits, is_popular, sort_order
+       FROM plans
+       WHERE is_active = TRUE
+       ORDER BY sort_order ASC`,
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('[GET /api/plans]', err);
+    res.status(500).json({ error: 'Failed to fetch plans.' });
+  }
+});
+
+// PATCH /api/admin/plans/:id — admin only, update any plan field
+plansRouter.patch('/:id', verifyAdmin, async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const {
+    name, badge, price_monthly, price_annual,
+    description, features, limits, is_popular, is_active, sort_order,
+  } = req.body as Record<string, unknown>;
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  let idx = 1;
+
+  const addField = (col: string, val: unknown) => {
+    if (val !== undefined) { fields.push(`${col} = $${idx++}`); values.push(val); }
+  };
+
+  addField('name',          name);
+  addField('badge',         badge);
+  addField('price_monthly', price_monthly);
+  addField('price_annual',  price_annual);
+  addField('description',   description);
+  addField('features',      features ? JSON.stringify(features) : undefined);
+  addField('limits',        limits   ? JSON.stringify(limits)   : undefined);
+  addField('is_popular',    is_popular);
+  addField('is_active',     is_active);
+  addField('sort_order',    sort_order);
+  fields.push('updated_at = NOW()');
+
+  if (fields.length === 1) {
+    res.status(400).json({ error: 'No fields to update.' });
+    return;
+  }
+
+  values.push(id);
+  try {
+    const result = await pool.query(
+      `UPDATE plans SET ${fields.join(', ')} WHERE id = $${idx} RETURNING *`,
+      values,
+    );
+    if (result.rowCount === 0) {
+      res.status(404).json({ error: 'Plan not found.' });
+      return;
+    }
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('[PATCH /api/admin/plans/:id]', err);
+    res.status(500).json({ error: 'Failed to update plan.' });
+  }
+});
