@@ -15,7 +15,7 @@ import chatRouter from './routes/chat';
 import blocklistRouter from './routes/blocklist';
 import analyticsRouter from './routes/analytics';
 import widgetRouter from './routes/widget';
-import adminRouter from './routes/admin';
+import adminRouter, { plansRouter } from './routes/admin';
 import embeddedSignupRouter from './routes/embeddedSignup';
 import trainingRouter from './routes/chatTraining';  // ← AI Training feature
 
@@ -71,6 +71,7 @@ app.use('/api/training', defaultLimiter, trainingRouter);  // ← AI Training fe
 app.use('/api/whatsapp', defaultLimiter, embeddedSignupRouter);  // ← Meta Embedded Signup
 app.use('/api/widget', widgetRouter);
 app.use('/api/admin', defaultLimiter, adminRouter);
+app.use('/api/plans', defaultLimiter, plansRouter);  // ← public plans endpoint (Home, Register)
 app.use('/api/webhook', webhookRouter);
 
 // Health check
@@ -130,15 +131,6 @@ app.get('*', defaultLimiter, (req, res, next) => {
   try {
     await initDB();
     console.log('✅ Database tables initialised.');
-
-    // Migration: update plan check constraint from 'advance' → 'advanced'
-    try {
-      await pool.query(`ALTER TABLE institutes DROP CONSTRAINT IF EXISTS institutes_plan_check`);
-      await pool.query(`ALTER TABLE institutes ADD CONSTRAINT institutes_plan_check CHECK (plan IN ('free', 'advanced', 'pro'))`);
-      console.log('✅ Plan constraint migrated.');
-    } catch (err) {
-      console.warn('⚠️  Plan constraint migration skipped (table may not exist yet):', err);
-    }
 
     // Delay session restore to let the server stabilize first
     setTimeout(() => {
