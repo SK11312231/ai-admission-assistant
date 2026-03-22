@@ -1,5 +1,22 @@
 import { Link } from 'react-router-dom';
+import { useEffect, useState } from 'react';
+import { apiUrl } from '../lib/api';
 
+// ── Types ─────────────────────────────────────────────────────────────────────
+interface PlanFeature { text: string; core: boolean; }
+interface Plan {
+  id: number;
+  slug: string;
+  name: string;
+  badge: string;
+  price_monthly: number;
+  price_annual: number;
+  description: string;
+  features: PlanFeature[];
+  is_popular: boolean;
+}
+
+// ── Static content ────────────────────────────────────────────────────────────
 const features = [
   {
     icon: '📲',
@@ -33,61 +50,71 @@ const features = [
   },
 ];
 
-const plans = [
+// ── Helpers ───────────────────────────────────────────────────────────────────
+function formatPrice(amount: number): string {
+  return '₹' + amount.toLocaleString('en-IN');
+}
+
+function annualSaving(monthly: number, annual: number): string {
+  const saving = monthly * 12 - annual;
+  return '₹' + saving.toLocaleString('en-IN');
+}
+
+// ── Fallback plans (shown while loading) ──────────────────────────────────────
+const FALLBACK_PLANS: Plan[] = [
   {
-    name: 'Free',
-    badge: '30 Days Free',
-    price: '₹0',
-    originalPrice: null,
-    duration: '30 days, no credit card',
-    description: 'Full access to all core features. No limits during trial.',
+    id: 1, slug: 'starter', name: 'Starter', badge: '14-Day Free Trial',
+    price_monthly: 2499, price_annual: 24990, is_popular: false,
+    description: 'Perfect for single-location coaching institutes starting with AI-powered admissions.',
     features: [
-      { text: 'Unlimited leads for 30 days', core: true },
-      { text: 'WhatsApp AI auto-reply (24/7)', core: true },
-      { text: 'Lead dashboard & status tracking', core: true },
-      { text: 'Conversation history per lead', core: true },
-      { text: 'Notes & follow-up management', core: true },
-      { text: 'Email notifications', core: true },
-      { text: 'Blocklist management', core: true },
-      { text: 'AI knowledge base (website enrichment)', core: true },
+      { text: '1 WhatsApp number', core: true },
+      { text: '500 AI responses / month', core: true },
+      { text: 'Up to 75 active leads tracked', core: true },
+      { text: 'Auto-reply & lead capture', core: true },
+      { text: 'Basic dashboard & analytics', core: true },
+      { text: 'Email support', core: true },
     ],
   },
   {
-    name: 'Advanced',
-    badge: 'Most Popular',
-    price: '₹1,499',
-    originalPrice: '₹2,999',
-    duration: 'per month',
-    description: 'Everything in Free, plus powerful analytics and chat widget.',
-    popular: true,
+    id: 2, slug: 'growth', name: 'Growth', badge: 'Most Popular',
+    price_monthly: 3999, price_annual: 39990, is_popular: true,
+    description: 'For growing institutes that are converting well and need more capacity.',
     features: [
-      { text: 'Everything in Free — unlimited leads', core: true },
-      { text: 'Analytics dashboard', core: false },
-      { text: 'Leads over time & peak hour charts', core: false },
-      { text: 'Conversion rate tracking', core: false },
-      { text: 'Embeddable website chat widget', core: false },
+      { text: 'Up to 2 WhatsApp numbers', core: true },
+      { text: '2,000 AI responses / month', core: true },
+      { text: 'Unlimited active leads', core: true },
+      { text: 'AI Training (upload chat history)', core: false },
+      { text: 'Advanced analytics & conversion reports', core: false },
+      { text: 'Follow-up sequences (auto 2nd & 3rd message)', core: false },
       { text: 'Priority email support', core: true },
     ],
   },
   {
-    name: 'Pro',
-    badge: 'Full Power',
-    price: '₹3,499',
-    originalPrice: '₹4,599',
-    duration: 'per month',
-    description: 'For growing institutes managing multiple campuses or admins.',
+    id: 3, slug: 'pro', name: 'Pro', badge: 'Full Power',
+    price_monthly: 8999, price_annual: 89990, is_popular: false,
+    description: 'For large institutes and multi-branch chains that need unlimited scale.',
     features: [
-      { text: 'Everything in Advanced', core: true },
-      { text: 'Multi-institute admin panel', core: false },
-      { text: 'Team accounts & role management', core: false },
-      { text: 'Custom AI prompt configuration', core: false },
-      { text: 'API access', core: false },
-      { text: 'Dedicated support & onboarding', core: true },
+      { text: 'Unlimited WhatsApp numbers', core: true },
+      { text: 'Unlimited AI responses', core: true },
+      { text: 'Multi-branch management (single dashboard)', core: false },
+      { text: 'Custom AI persona & tone training', core: false },
+      { text: 'Bulk broadcast messaging', core: false },
+      { text: 'Dedicated support + onboarding call', core: true },
     ],
   },
 ];
 
+// ── Component ─────────────────────────────────────────────────────────────────
 export default function Home() {
+  const [plans, setPlans] = useState<Plan[]>(FALLBACK_PLANS);
+
+  useEffect(() => {
+    fetch(apiUrl('/api/plans'))
+      .then(r => r.json())
+      .then((data: Plan[]) => { if (Array.isArray(data) && data.length) setPlans(data); })
+      .catch(() => { /* silently use fallback */ });
+  }, []);
+
   return (
     <div className="flex flex-col">
 
@@ -107,7 +134,7 @@ export default function Home() {
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
             <Link to="/register"
               className="bg-white text-indigo-700 font-semibold px-8 py-3 rounded-xl hover:bg-indigo-50 transition-colors text-base">
-              Register Your Institute →
+              Start Free Trial →
             </Link>
             <Link to="/login"
               className="border border-white/50 text-white font-semibold px-8 py-3 rounded-xl hover:bg-white/10 transition-colors text-base">
@@ -166,41 +193,51 @@ export default function Home() {
       <section className="py-20 px-4 bg-white">
         <div className="max-w-5xl mx-auto">
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-3">Simple, Transparent Pricing</h2>
-          <p className="text-center text-gray-500 mb-3 max-w-lg mx-auto">Start free for 30 days. No credit card required.</p>
+          <p className="text-center text-gray-500 mb-3 max-w-lg mx-auto">
+            Try free for 14 days on our Growth plan. No credit card required.
+          </p>
           <p className="text-center mb-12">
             <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-1 rounded-full">
-              🎉 Launch offer — prices shown are discounted from original
+              🎉 Annual plans save 2 months — pay for 10, get 12
             </span>
           </p>
+
           <div className="grid sm:grid-cols-3 gap-6 items-start">
             {plans.map((plan) => (
-              <div key={plan.name}
+              <div key={plan.slug}
                 className={`rounded-2xl border flex flex-col overflow-hidden ${
-                  plan.popular
+                  plan.is_popular
                     ? 'border-indigo-400 ring-2 ring-indigo-200 shadow-lg shadow-indigo-100'
                     : 'border-gray-200'
                 }`}>
 
                 {/* Card header */}
-                <div className={`px-6 pt-6 pb-5 ${plan.popular ? 'bg-indigo-600' : 'bg-gray-50'}`}>
-                  <span className={`text-xs font-bold uppercase tracking-widest ${plan.popular ? 'text-indigo-200' : 'text-indigo-500'}`}>
+                <div className={`px-6 pt-6 pb-5 ${plan.is_popular ? 'bg-indigo-600' : 'bg-gray-50'}`}>
+                  <span className={`text-xs font-bold uppercase tracking-widest ${plan.is_popular ? 'text-indigo-200' : 'text-indigo-500'}`}>
                     {plan.badge}
                   </span>
-                  <h3 className={`text-xl font-bold mt-1 ${plan.popular ? 'text-white' : 'text-gray-900'}`}>{plan.name}</h3>
-                  <p className={`text-xs mt-1 mb-4 ${plan.popular ? 'text-indigo-200' : 'text-gray-500'}`}>{plan.description}</p>
+                  <h3 className={`text-xl font-bold mt-1 ${plan.is_popular ? 'text-white' : 'text-gray-900'}`}>
+                    {plan.name}
+                  </h3>
+                  <p className={`text-xs mt-1 mb-4 ${plan.is_popular ? 'text-indigo-200' : 'text-gray-500'}`}>
+                    {plan.description}
+                  </p>
 
                   {/* Price */}
                   <div className="flex items-end gap-2">
-                    <span className={`text-4xl font-extrabold leading-none ${plan.popular ? 'text-white' : 'text-gray-900'}`}>
-                      {plan.price}
+                    <span className={`text-4xl font-extrabold leading-none ${plan.is_popular ? 'text-white' : 'text-gray-900'}`}>
+                      {formatPrice(plan.price_monthly)}
                     </span>
-                    {plan.originalPrice && (
-                      <span className={`text-sm line-through mb-1 ${plan.popular ? 'text-indigo-300' : 'text-gray-400'}`}>
-                        {plan.originalPrice}
-                      </span>
-                    )}
                   </div>
-                  <p className={`text-xs mt-1 ${plan.popular ? 'text-indigo-200' : 'text-gray-400'}`}>{plan.duration}</p>
+                  <p className={`text-xs mt-1 ${plan.is_popular ? 'text-indigo-200' : 'text-gray-400'}`}>
+                    per month &nbsp;·&nbsp;
+                    <span className={plan.is_popular ? 'text-indigo-100 font-semibold' : 'text-gray-500 font-semibold'}>
+                      {formatPrice(plan.price_annual)}/year
+                    </span>
+                  </p>
+                  <p className={`text-xs mt-0.5 ${plan.is_popular ? 'text-green-300' : 'text-green-600'}`}>
+                    Save {annualSaving(plan.price_monthly, plan.price_annual)} on annual plan
+                  </p>
                 </div>
 
                 {/* Features */}
@@ -209,11 +246,11 @@ export default function Home() {
                     {plan.features.map((f) => (
                       <li key={f.text} className="flex items-start gap-2 text-sm">
                         <span className={`mt-0.5 flex-shrink-0 font-bold ${f.core ? 'text-green-500' : 'text-indigo-500'}`}>✓</span>
-                        <span className={f.core ? 'text-gray-700' : 'text-gray-700'}>
+                        <span className="text-gray-700">
                           {f.text}
                           {!f.core && (
                             <span className="ml-1.5 text-xs bg-indigo-50 text-indigo-600 font-semibold px-1.5 py-0.5 rounded-full">
-                              New
+                              Premium
                             </span>
                           )}
                         </span>
@@ -224,20 +261,30 @@ export default function Home() {
 
                 {/* CTA */}
                 <div className="px-6 pb-6 bg-white">
-                  {plan.name === 'Free' ? (
-                    <Link to="/register"
-                      className="block text-center py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
-                      Start Free Trial →
-                    </Link>
+                  {plan.slug === 'starter' ? (
+                    <>
+                      <Link to="/register"
+                        className="block text-center py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
+                        Start 14-Day Free Trial →
+                      </Link>
+                      <p className="text-center text-xs text-gray-400 mt-2">
+                        Trial includes Growth features — no credit card
+                      </p>
+                    </>
                   ) : (
-                    <div className="block text-center py-2.5 rounded-xl text-sm font-semibold bg-gray-100 text-gray-400 cursor-not-allowed select-none">
-                      🚀 Launching Soon
-                    </div>
-                  )}
-                  {plan.originalPrice && (
-                    <p className="text-center text-xs text-gray-400 mt-2">
-                      Save {plan.name === 'Advanced' ? '₹1,500' : '₹1,100'}/month vs original price
-                    </p>
+                    <>
+                      <Link to="/register"
+                        className={`block text-center py-2.5 rounded-xl text-sm font-semibold transition-colors ${
+                          plan.is_popular
+                            ? 'bg-indigo-600 text-white hover:bg-indigo-700'
+                            : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                        }`}>
+                        Get Started →
+                      </Link>
+                      <p className="text-center text-xs text-gray-400 mt-2">
+                        Start with a 14-day trial first
+                      </p>
+                    </>
                   )}
                 </div>
               </div>
@@ -255,7 +302,7 @@ export default function Home() {
           </p>
           <Link to="/register"
             className="bg-indigo-600 text-white font-semibold px-8 py-3 rounded-xl hover:bg-indigo-700 transition-colors inline-block text-base">
-            Register Now — It's Free →
+            Start Free Trial — No Credit Card →
           </Link>
         </div>
       </section>

@@ -1,22 +1,45 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Logo from '../components/Logo';
 import { useNavigate, Link } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 
+interface Plan {
+  id: number;
+  slug: string;
+  name: string;
+  price_monthly: number;
+  badge: string;
+}
+
 export default function Register() {
   const navigate = useNavigate();
+  const [plans, setPlans] = useState<Plan[]>([]);
   const [form, setForm] = useState({
     name: '',
     email: '',
     phone: '',
     whatsapp_number: '',
     website: '',
-    plan: 'free',
+    plan: 'starter',
     password: '',
     confirmPassword: '',
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(apiUrl('/api/plans'))
+      .then(r => r.json())
+      .then((data: Plan[]) => { if (Array.isArray(data) && data.length) setPlans(data); })
+      .catch(() => {
+        // Fallback static plans if API fails
+        setPlans([
+          { id: 1, slug: 'starter', name: 'Starter', price_monthly: 2499, badge: '14-Day Free Trial' },
+          { id: 2, slug: 'growth',  name: 'Growth',  price_monthly: 3999, badge: 'Most Popular' },
+          { id: 3, slug: 'pro',     name: 'Pro',     price_monthly: 8999, badge: 'Full Power' },
+        ]);
+      });
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -52,6 +75,8 @@ export default function Register() {
     }
   };
 
+  const selectedPlan = plans.find(p => p.slug === form.plan);
+
   return (
     <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center bg-gray-50 px-4 py-12">
       <div className="w-full max-w-md">
@@ -63,6 +88,12 @@ export default function Register() {
             </div>
             <h1 className="text-2xl font-bold text-gray-900">Register Your Institute</h1>
             <p className="text-gray-500 text-sm mt-1">Start capturing and managing leads efficiently</p>
+          </div>
+
+          {/* Trial banner */}
+          <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 text-center">
+            <p className="text-sm font-semibold text-indigo-800">🎉 14-Day Free Trial — No Credit Card Required</p>
+            <p className="text-xs text-indigo-600 mt-0.5">Full Growth plan features unlocked during your trial.</p>
           </div>
 
           {error && (
@@ -116,15 +147,29 @@ export default function Register() {
               <p className="text-xs text-gray-400 mt-1">We'll auto-generate your AI assistant's knowledge base from this.</p>
             </div>
 
+            {/* Plan selector */}
             <div>
-              <label htmlFor="plan" className="block text-sm font-medium text-gray-700 mb-1">Plan</label>
+              <label htmlFor="plan" className="block text-sm font-medium text-gray-700 mb-1">
+                Choose Your Plan
+              </label>
               <select id="plan" name="plan" value={form.plan} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
-                <option value="free">Free — ₹0 (30-day trial)</option>
-                <option value="advanced" disabled>Advanced — ₹1,499/month (Launching Soon)</option>
-                <option value="pro" disabled>Pro — ₹3,499/month (Launching Soon)</option>
+                {plans.length === 0 ? (
+                  <option value="starter">Starter — ₹2,499/month</option>
+                ) : (
+                  plans.map(plan => (
+                    <option key={plan.slug} value={plan.slug}>
+                      {plan.name} — ₹{plan.price_monthly.toLocaleString('en-IN')}/month
+                      {plan.slug === 'growth' ? ' ⭐ Most Popular' : ''}
+                    </option>
+                  ))
+                )}
               </select>
-              <p className="text-xs text-gray-400 mt-1">Advanced &amp; Pro plans are launching soon. Start with the free trial.</p>
+              {selectedPlan && (
+                <p className="text-xs text-indigo-600 mt-1 font-medium">
+                  ✓ Your 14-day trial gives you full Growth features regardless of the plan you choose.
+                </p>
+              )}
             </div>
 
             <div>
@@ -153,7 +198,7 @@ export default function Register() {
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   Registering…
                 </span>
-              ) : 'Create Account →'}
+              ) : 'Start Free Trial →'}
             </button>
           </form>
 
