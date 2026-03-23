@@ -36,9 +36,9 @@ interface Settings {
 type Tab = 'overview' | 'institutes' | 'upgrades' | 'leads' | 'blocklist' | 'remove' | 'settings';
 
 const PLAN_COLORS: Record<string, string> = {
-  free: 'bg-gray-100 text-gray-600',
-  advanced: 'bg-indigo-100 text-indigo-700',
-  pro: 'bg-purple-100 text-purple-700',
+  starter: 'bg-gray-100 text-gray-600',
+  growth:  'bg-indigo-100 text-indigo-700',
+  pro:     'bg-purple-100 text-purple-700',
 };
 const STATUS_COLORS: Record<string, string> = {
   new: 'bg-blue-100 text-blue-700', contacted: 'bg-yellow-100 text-yellow-700',
@@ -387,7 +387,7 @@ export default function Dashboard() {
                 <div className="bg-white rounded-2xl border border-slate-200 p-5">
                   <h3 className="text-sm font-semibold text-slate-800 mb-4">Plan Distribution</h3>
                   <div className="space-y-3">
-                    {['free', 'advanced', 'pro'].map(plan => {
+                    {['starter', 'growth', 'pro'].map(plan => {
                       const count = overview.planBreakdown[plan] ?? 0;
                       const pct = Math.round((count / (overview.totalInstitutes || 1)) * 100);
                       return (
@@ -397,7 +397,7 @@ export default function Dashboard() {
                             <span className="text-slate-500">{count} · {pct}%</span>
                           </div>
                           <div className="h-2 bg-slate-100 rounded-full overflow-hidden">
-                            <div className={`h-full rounded-full ${plan === 'free' ? 'bg-slate-400' : plan === 'advanced' ? 'bg-indigo-500' : 'bg-purple-500'}`} style={{ width: `${pct}%` }} />
+                            <div className={`h-full rounded-full ${plan === 'starter' ? 'bg-slate-400' : plan === 'growth' ? 'bg-indigo-500' : 'bg-purple-500'}`} style={{ width: `${pct}%` }} />
                           </div>
                         </div>
                       );
@@ -450,7 +450,7 @@ export default function Dashboard() {
                               <div className="flex items-center gap-1.5">
                                 <select defaultValue={inst.plan} id={`plan-select-${inst.id}`}
                                   className="text-xs border border-slate-300 rounded-lg px-2 py-1 focus:outline-none">
-                                  {['free', 'advanced', 'pro'].map(p => <option key={p} value={p}>{p}</option>)}
+                                  {['starter', 'growth', 'pro'].map(p => <option key={p} value={p}>{p}</option>)}
                                 </select>
                                 <button onClick={() => { const s = document.getElementById(`plan-select-${inst.id}`) as HTMLSelectElement; void updatePlan(inst.id, s.value); }}
                                   className="text-xs bg-green-500 text-white px-2 py-1 rounded-lg">✓</button>
