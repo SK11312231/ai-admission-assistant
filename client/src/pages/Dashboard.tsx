@@ -112,9 +112,6 @@ const STATUS_COLORS: Record<string, string> = {
   lost: 'bg-red-100 text-red-700',
 };
 
-function isPremium(plan: string): boolean {
-  return ['growth', 'pro'].includes(plan.toLowerCase());
-}
 
 function isOverdue(date: string | null): boolean {
   if (!date) return false;
