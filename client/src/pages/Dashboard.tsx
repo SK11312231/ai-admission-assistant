@@ -3,11 +3,35 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
 import EmbeddedSignup from '../components/EmbeddedSignup';
+
+// ── Razorpay global type declaration ─────────────────────────────────────────
+declare global {
+  interface Window {
+    Razorpay?: new (options: RazorpayOptions) => { open(): void };
+  }
+}
+
+interface RazorpayOptions {
+  key: string;
+  amount: number;
+  currency: string;
+  name: string;
+  description: string;
+  order_id: string;
+  prefill: { name: string; email: string };
+  theme: { color: string };
+  handler: (response: {
+    razorpay_order_id: string;
+    razorpay_payment_id: string;
+    razorpay_signature: string;
+  }) => void;
+  modal: { ondismiss: () => void };
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -72,7 +96,7 @@ type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'trainin
 function getTrialDaysLeft(createdAt: string): number {
   const created = new Date(createdAt).getTime();
   const daysUsed = Math.floor((Date.now() - created) / (1000 * 60 * 60 * 24));
-  return Math.max(0, 30 - daysUsed);
+  return Math.max(0, 14 - daysUsed);
 }
 
 function isTrialExpired(createdAt: string): boolean {
@@ -88,9 +112,6 @@ const STATUS_COLORS: Record<string, string> = {
   lost: 'bg-red-100 text-red-700',
 };
 
-function isPremium(plan: string): boolean {
-  return ['advanced', 'pro'].includes(plan.toLowerCase());
-}
 
 function isOverdue(date: string | null): boolean {
   if (!date) return false;
@@ -117,7 +138,9 @@ function formatFollowUp(date: string | null): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [institute, setInstitute] = useState<Institute | null>(null);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState<{
     complete: boolean; score: number; missing: string[]; present: string[];
   } | null>(null);
@@ -186,7 +209,7 @@ export default function Dashboard() {
   const [upgrading, setUpgrading] = useState(false);
   const [upgradeError, setUpgradeError] = useState<string | null>(null);
   const [upgradeSuccess, setUpgradeSuccess] = useState(false);
-  const [pendingUpgrade, setPendingUpgrade] = useState<{ requested_plan: string; created_at: string } | null>(null);
+  const [selectedBilling, setSelectedBilling] = useState<'monthly' | 'annual'>('monthly');
 
   // Widget tab
   const [widgetCopied, setWidgetCopied] = useState(false);
@@ -233,24 +256,39 @@ export default function Dashboard() {
         setLeads(await res.json() as Lead[]);
       } catch { /* silent */ }
 
+      // Fetch active subscription — determines if Growth/Pro features are unlocked
+      try {
+        const subRes = await fetch(apiUrl(`/api/payment/subscription/${inst.id}`));
+        if (subRes.ok) {
+          const sub = await subRes.json() as { status: string } | null;
+          setHasActiveSubscription(sub?.status === 'active');
+        }
+      } catch { /* silent */ }
+
       // Fetch profile completeness
       try {
         const cRes = await fetch(apiUrl(`/api/institutes/${inst.id}/profile-completeness`));
         if (cRes.ok) setProfileCompleteness(await cRes.json());
       } catch { /* silent */ }
 
-      // Fetch pending upgrade request
-      try {
-        const res = await fetch(apiUrl(`/api/institutes/${inst.id}/upgrade-request`));
-        if (res.ok) {
-          const data = await res.json() as { requested_plan: string; created_at: string } | null;
-          setPendingUpgrade(data);
-        }
-      } catch { /* silent */ }
-
       finally { setLoading(false); }
     })();
   }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-open payment for Growth/Pro when redirected from Register ───────────
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const upgradePlan = params.get('upgrade') as 'growth' | 'pro' | null;
+    if (upgradePlan && ['growth', 'pro'].includes(upgradePlan)) {
+      // Clean the URL immediately
+      window.history.replaceState({}, '', '/dashboard');
+      // Delay to let dashboard fully load, then go straight to Razorpay checkout
+      const t = setTimeout(() => {
+        void handlePayAndUpgrade(upgradePlan);
+      }, 1000);
+      return () => clearTimeout(t);
+    }
+  }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Profile tab load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -468,25 +506,98 @@ export default function Dashboard() {
     } finally { setAddLoading(false); }
   };
 
-  // ── Request plan upgrade ────────────────────────────────────────────────────
-  const handleRequestUpgrade = async (plan: 'advanced' | 'pro') => {
+  // ── Razorpay payment checkout ────────────────────────────────────────────────
+  const handlePayAndUpgrade = async (plan: 'growth' | 'pro') => {
     if (!institute) return;
     setUpgrading(true);
     setUpgradeError(null);
     try {
-      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/request-upgrade`), {
+      // Step 1: Create Razorpay order on backend
+      const orderRes = await fetch(apiUrl('/api/payment/create-order'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ plan }),
+        body: JSON.stringify({
+          institute_id: institute.id,
+          plan,
+          billing_cycle: selectedBilling,
+        }),
       });
-      const data = await res.json() as { success?: boolean; requestId?: number; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Request failed.');
-      setPendingUpgrade({ requested_plan: plan, created_at: new Date().toISOString() });
-      setUpgradeSuccess(true);
-      setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 3000);
+      const orderData = await orderRes.json() as {
+        order_id: string; amount: number; currency: string;
+        key_id: string; institute_name: string; institute_email: string;
+        error?: string;
+      };
+      if (!orderRes.ok) throw new Error(orderData.error ?? 'Failed to create order.');
+
+      // Step 2: Open Razorpay checkout
+      const options = {
+        key:         orderData.key_id,
+        amount:      orderData.amount,
+        currency:    orderData.currency,
+        name:        'InquiAI',
+        description: `${plan.charAt(0).toUpperCase() + plan.slice(1)} Plan — ${selectedBilling}`,
+        order_id:    orderData.order_id,
+        prefill: {
+          name:  orderData.institute_name,
+          email: orderData.institute_email,
+        },
+        theme: { color: '#4f46e5' },
+        handler: async (response: {
+          razorpay_order_id: string;
+          razorpay_payment_id: string;
+          razorpay_signature: string;
+        }) => {
+          // Step 3: Verify payment on backend
+          try {
+            const verifyRes = await fetch(apiUrl('/api/payment/verify'), {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                razorpay_order_id:  response.razorpay_order_id,
+                razorpay_payment_id: response.razorpay_payment_id,
+                razorpay_signature: response.razorpay_signature,
+                institute_id: institute.id,
+              }),
+            });
+            const verifyData = await verifyRes.json() as {
+              success: boolean; plan: string; expires_at: string; error?: string;
+            };
+            if (!verifyRes.ok) throw new Error(verifyData.error ?? 'Verification failed.');
+
+            // Update local institute state
+            const updated = { ...institute, plan: verifyData.plan };
+            localStorage.setItem('institute', JSON.stringify(updated));
+            setInstitute(updated);
+            setHasActiveSubscription(true); // payment confirmed
+            setUpgradeSuccess(true);
+            setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 4000);
+          } catch (err) {
+            setUpgradeError(err instanceof Error ? err.message : 'Payment verification failed. Contact support.');
+          } finally {
+            setUpgrading(false);
+          }
+        },
+        modal: {
+          ondismiss: () => { setUpgrading(false); },
+        },
+      };
+
+      // Load Razorpay script if not already loaded
+      if (!window.Razorpay) {
+        await new Promise<void>((resolve, reject) => {
+          const script = document.createElement('script');
+          script.src = 'https://checkout.razorpay.com/v1/checkout.js';
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error('Failed to load Razorpay.'));
+          document.body.appendChild(script);
+        });
+      }
+
+      const rzp = new window.Razorpay!(options);
+      rzp.open();
+      // Note: setUpgrading(false) is handled in handler/ondismiss
     } catch (err) {
       setUpgradeError(err instanceof Error ? err.message : 'Something went wrong.');
-    } finally {
       setUpgrading(false);
     }
   };
@@ -503,13 +614,17 @@ export default function Dashboard() {
 
   if (!institute) return null;
 
-  const isPaid = isPremium(institute.plan);
-  const trialLeft = institute.created_at ? getTrialDaysLeft(institute.created_at) : 30;
-  const trialExpired = institute.created_at ? isTrialExpired(institute.created_at) : false;
-  // Premium features accessible during trial OR on paid plan
-  const premiumUnlocked = isPaid || !trialExpired;
-  const trialPercent = institute.created_at
-    ? Math.min(100, Math.round(((30 - trialLeft) / 30) * 100))
+  const isStarter = institute.plan === 'starter';
+  // isPaid = true only if there's a confirmed active subscription in DB
+  // Starter plan doesn't need a subscription — it uses the trial window
+  const isPaid = isStarter ? false : hasActiveSubscription;
+  // Trial only applies to Starter plan — Growth/Pro require payment
+  const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
+  const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : !isStarter;
+  // Premium features unlocked if: paid subscription OR starter still in trial window
+  const premiumUnlocked = isPaid || (isStarter && !trialExpired);
+  const trialPercent = isStarter && institute.created_at
+    ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
     : 0;
 
   // Nav items config
@@ -625,10 +740,11 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Upgrade Modal */}
+      {/* ── Payment / Upgrade Modal ──────────────────────────────────────────── */}
       {showUpgradeModal && (
         <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+            {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <div>
                 <h2 className="text-lg font-bold text-gray-900">Upgrade Your Plan</h2>
@@ -639,83 +755,96 @@ export default function Dashboard() {
               <button onClick={() => { setShowUpgradeModal(false); setUpgradeError(null); setUpgradeSuccess(false); }}
                 className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
+
             {upgradeSuccess ? (
               <div className="py-10 flex flex-col items-center gap-3 text-center">
-                <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center text-3xl">📨</div>
-                <p className="text-gray-900 font-bold text-lg">Upgrade Request Sent!</p>
-                <p className="text-sm text-gray-500 max-w-xs">We've notified the InquiAI team. Your plan will be upgraded after review — usually within 24 hours.</p>
+                <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center text-3xl">🎉</div>
+                <p className="text-gray-900 font-bold text-lg">Payment Successful!</p>
+                <p className="text-sm text-gray-500 max-w-xs">Your plan has been upgraded. A confirmation email is on its way. Enjoy your new features!</p>
               </div>
             ) : (
               <>
-                {pendingUpgrade && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
-                    <span className="text-lg mt-0.5">⏳</span>
-                    <div>
-                      <p className="text-sm font-semibold text-amber-800">Upgrade Request Pending</p>
-                      <p className="text-xs text-amber-700 mt-0.5">Your request to upgrade to <span className="font-bold capitalize">{pendingUpgrade.requested_plan}</span> is awaiting approval.</p>
-                    </div>
-                  </div>
-                )}
                 {upgradeError && (
                   <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{upgradeError}</div>
                 )}
+
+                {/* Billing toggle */}
+                <div className="flex items-center justify-center gap-1 bg-gray-100 rounded-xl p-1 mb-5">
+                  <button onClick={() => setSelectedBilling('monthly')}
+                    className={`flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors ${selectedBilling === 'monthly' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                    Monthly
+                  </button>
+                  <button onClick={() => setSelectedBilling('annual')}
+                    className={`flex-1 py-1.5 text-sm font-semibold rounded-lg transition-colors ${selectedBilling === 'annual' ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500'}`}>
+                    Annual <span className="text-green-600 text-xs font-bold ml-1">Save 2 months</span>
+                  </button>
+                </div>
+
                 <div className="grid sm:grid-cols-2 gap-4">
-                  {/* Advanced */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'advanced' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
+                  {/* Growth */}
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'growth' && isPaid ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200 transition-colors'}`}>
                     <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Advanced</span>
-                      {institute.plan === 'advanced' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
-                      {pendingUpgrade?.requested_plan === 'advanced' && institute.plan !== 'advanced' && (
-                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
-                      )}
+                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Growth</span>
+                      {institute.plan === 'growth' && isPaid && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">✅ Active</span>}
+                      {institute.plan === 'growth' && !isPaid && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⚠️ Unpaid</span>}
                     </div>
-                    <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹1,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹2,999</span>
+                    <div className="flex items-end gap-1 mb-0.5">
+                      <span className="text-2xl font-extrabold text-gray-900">
+                        ₹{selectedBilling === 'annual' ? '39,990' : '3,999'}
+                      </span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <p className="text-xs text-gray-500 mb-3">
+                      {selectedBilling === 'annual' ? 'per year (₹3,332/mo)' : 'per month'}
+                    </p>
                     <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Unlimited leads', 'Analytics dashboard', 'Leads over time & peak hour charts', 'Conversion rate tracking', 'Embeddable chat widget', 'AI Training'].map(f => (
+                      {['2 WhatsApp numbers', '2,000 AI responses/month', 'Unlimited active leads', 'AI Training', 'Advanced analytics', 'Follow-up sequences'].map(f => (
                         <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
                           <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
                         </li>
                       ))}
                     </ul>
-                    <button onClick={() => void handleRequestUpgrade('advanced')}
-                      disabled={upgrading || institute.plan === 'advanced' || institute.plan === 'pro' || !!pendingUpgrade}
+                    <button onClick={() => void handlePayAndUpgrade('growth')}
+                      disabled={upgrading || (institute.plan === 'growth' && isPaid) || (institute.plan === 'pro' && isPaid)}
                       className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                      {upgrading ? 'Submitting…' : institute.plan === 'advanced' ? 'Current Plan' : institute.plan === 'pro' ? 'Already on Pro' : pendingUpgrade?.requested_plan === 'advanced' ? '⏳ Pending' : pendingUpgrade ? 'Another Request Pending' : 'Request Upgrade →'}
+                      {upgrading ? <span className="flex items-center justify-center gap-2"><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>Processing…</span>
+                        : (institute.plan === 'growth' && isPaid) ? 'Active Plan'
+                        : (institute.plan === 'pro' && isPaid) ? 'Downgrade not available'
+                        : '💳 Pay & Activate →'}
                     </button>
                   </div>
+
                   {/* Pro */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}>
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' && isPaid ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:border-purple-200 transition-colors'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-bold text-purple-600 uppercase tracking-widest">Pro</span>
-                      {institute.plan === 'pro' && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
-                      {pendingUpgrade?.requested_plan === 'pro' && institute.plan !== 'pro' && (
-                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
-                      )}
+                      {institute.plan === 'pro' && isPaid && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">✅ Active</span>}
+                      {institute.plan === 'pro' && !isPaid && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⚠️ Unpaid</span>}
                     </div>
-                    <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹3,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹4,599</span>
+                    <div className="flex items-end gap-1 mb-0.5">
+                      <span className="text-2xl font-extrabold text-gray-900">
+                        ₹{selectedBilling === 'annual' ? '89,990' : '8,999'}
+                      </span>
                     </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
+                    <p className="text-xs text-gray-500 mb-3">
+                      {selectedBilling === 'annual' ? 'per year (₹7,499/mo)' : 'per month'}
+                    </p>
                     <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Everything in Advanced', 'Multi-institute admin panel', 'Team accounts & roles', 'Custom AI prompt config', 'API access', 'Dedicated onboarding'].map(f => (
+                      {['Unlimited WhatsApp numbers', 'Unlimited AI responses', 'Multi-branch dashboard', 'Custom AI persona training', 'Bulk broadcast messaging', 'Dedicated onboarding call'].map(f => (
                         <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
                           <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
                         </li>
                       ))}
                     </ul>
-                    <button onClick={() => void handleRequestUpgrade('pro')}
-                      disabled={upgrading || institute.plan === 'pro' || !!pendingUpgrade}
+                    <button onClick={() => void handlePayAndUpgrade('pro')}
+                      disabled={upgrading || (institute.plan === 'pro' && isPaid)}
                       className="w-full bg-purple-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors">
-                      {upgrading ? 'Submitting…' : institute.plan === 'pro' ? 'Current Plan' : pendingUpgrade?.requested_plan === 'pro' ? '⏳ Pending' : pendingUpgrade ? 'Another Request Pending' : 'Request Upgrade →'}
+                      {upgrading ? <span className="flex items-center justify-center gap-2"><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>Processing…</span>
+                        : (institute.plan === 'pro' && isPaid) ? 'Active Plan'
+                        : '💳 Pay & Activate →'}
                     </button>
                   </div>
                 </div>
-                <p className="text-center text-xs text-gray-400 mt-4">📩 Reviewed by our team · Usually approved within 24 hours</p>
+                <p className="text-center text-xs text-gray-400 mt-4">🔒 Secured by Razorpay · Instant activation after payment</p>
               </>
             )}
           </div>
@@ -792,25 +921,38 @@ export default function Dashboard() {
         {/* Upgrade card */}
         {!isPaid && (
           <div style={{ margin: '14px 10px 0', background: '#0e0d17', border: '1px solid #1e1c30', borderRadius: '10px', padding: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 500, color: '#8884a0' }}>
-                {trialExpired ? 'Trial ended' : 'Free trial'}
-              </span>
-              <span style={{ fontSize: '10px', color: trialExpired ? '#a32d2d' : '#4a4768' }}>
-                {trialExpired ? 'Expired' : `${trialLeft}d left`}
-              </span>
-            </div>
-            <div style={{ height: '3px', background: '#1e1c2e', borderRadius: '2px', overflow: 'hidden', marginBottom: '8px' }}>
-              <div style={{ height: '100%', width: `${trialPercent}%`, background: trialExpired ? '#a32d2d' : '#534ab7', borderRadius: '2px' }} />
-            </div>
-            <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
-              {trialExpired
-                ? 'Premium features are locked. Upgrade to restore access.'
-                : 'Premium features are active. Upgrade before trial ends.'}
-            </p>
+            {isStarter ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 500, color: '#8884a0' }}>
+                    {trialExpired ? 'Trial ended' : '14-day trial'}
+                  </span>
+                  <span style={{ fontSize: '10px', color: trialExpired ? '#a32d2d' : '#4a4768' }}>
+                    {trialExpired ? 'Expired' : `${trialLeft}d left`}
+                  </span>
+                </div>
+                <div style={{ height: '3px', background: '#1e1c2e', borderRadius: '2px', overflow: 'hidden', marginBottom: '8px' }}>
+                  <div style={{ height: '100%', width: `${trialPercent}%`, background: trialExpired ? '#a32d2d' : '#534ab7', borderRadius: '2px' }} />
+                </div>
+                <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
+                  {trialExpired
+                    ? 'Trial ended. Upgrade to restore access.'
+                    : 'Trial active. Upgrade before it ends.'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b', marginBottom: '4px' }}>
+                  💳 Payment required
+                </p>
+                <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
+                  Complete payment to activate your {institute.plan} plan features.
+                </p>
+              </>
+            )}
             <button onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
               style={{ width: '100%', background: trialExpired ? '#4a2020' : '#1f1c30', border: `1px solid ${trialExpired ? '#6b2020' : '#2d2a42'}`, borderRadius: '6px', color: trialExpired ? '#f09595' : '#afa9ec', fontSize: '11px', fontWeight: 500, padding: '7px', cursor: 'pointer' }}>
-              {trialExpired ? '🔓 Unlock features →' : 'Upgrade plan →'}
+              {!isStarter ? '💳 Pay & Activate →' : trialExpired ? '🔓 Unlock features →' : 'Upgrade plan →'}
             </button>
           </div>
         )}
@@ -926,125 +1068,7 @@ export default function Dashboard() {
           )}
 
 
-      {/* ── Upgrade Modal ───────────────────────────────────────────────────── */}
-      {showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h2 className="text-lg font-bold text-gray-900">Upgrade Your Plan</h2>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  Currently on <span className="font-semibold capitalize text-indigo-600">{institute.plan}</span> plan
-                </p>
-              </div>
-              <button onClick={() => { setShowUpgradeModal(false); setUpgradeError(null); setUpgradeSuccess(false); }}
-                className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
-            </div>
-
-            {upgradeSuccess ? (
-              <div className="py-10 flex flex-col items-center gap-3 text-center">
-                <div className="w-16 h-16 bg-indigo-50 rounded-full flex items-center justify-center text-3xl">📨</div>
-                <p className="text-gray-900 font-bold text-lg">Upgrade Request Sent!</p>
-                <p className="text-sm text-gray-500 max-w-xs">
-                  We've notified the InquiAI team. Your plan will be upgraded after review — usually within 24 hours.
-                </p>
-              </div>
-            ) : (
-              <>
-                {pendingUpgrade && (
-                  <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-4 flex items-start gap-3">
-                    <span className="text-lg mt-0.5">⏳</span>
-                    <div>
-                      <p className="text-sm font-semibold text-amber-800">Upgrade Request Pending</p>
-                      <p className="text-xs text-amber-700 mt-0.5">
-                        Your request to upgrade to <span className="font-bold capitalize">{pendingUpgrade.requested_plan}</span> is awaiting approval.
-                        We'll notify you once it's processed.
-                      </p>
-                    </div>
-                  </div>
-                )}
-
-                {upgradeError && (
-                  <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{upgradeError}</div>
-                )}
-
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {/* Advanced */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'advanced' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200'}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Advanced</span>
-                      {institute.plan === 'advanced' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
-                      {pendingUpgrade?.requested_plan === 'advanced' && institute.plan !== 'advanced' && (
-                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
-                      )}
-                    </div>
-                    <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹1,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹2,999</span>
-                    </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
-                    <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Unlimited leads', 'Analytics dashboard', 'Leads over time & peak hour charts', 'Conversion rate tracking', 'Embeddable chat widget'].map(f => (
-                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
-                          <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
-                        </li>
-                      ))}
-                    </ul>
-                    <button
-                      onClick={() => void handleRequestUpgrade('advanced')}
-                      disabled={upgrading || institute.plan === 'advanced' || institute.plan === 'pro' || !!pendingUpgrade}
-                      className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
-                      {upgrading ? 'Submitting…'
-                        : institute.plan === 'advanced' ? 'Current Plan'
-                        : institute.plan === 'pro' ? 'Already on Pro'
-                        : pendingUpgrade?.requested_plan === 'advanced' ? '⏳ Request Pending'
-                        : pendingUpgrade ? 'Another Request Pending'
-                        : 'Request Upgrade →'}
-                    </button>
-                  </div>
-
-                  {/* Pro */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' ? 'border-purple-400 bg-purple-50' : 'border-gray-200'}`}>
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-xs font-bold text-purple-600 uppercase tracking-widest">Pro</span>
-                      {institute.plan === 'pro' && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
-                      {pendingUpgrade?.requested_plan === 'pro' && institute.plan !== 'pro' && (
-                        <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⏳ Pending</span>
-                      )}
-                    </div>
-                    <div className="flex items-end gap-1.5 mb-1">
-                      <span className="text-2xl font-extrabold text-gray-900">₹3,499</span>
-                      <span className="text-xs text-gray-400 line-through mb-1">₹4,599</span>
-                    </div>
-                    <p className="text-xs text-gray-500 mb-3">per month</p>
-                    <ul className="space-y-1.5 flex-1 mb-4">
-                      {['Everything in Advanced', 'Multi-institute admin panel', 'Team accounts & roles', 'Custom AI prompt config', 'API access', 'Dedicated onboarding'].map(f => (
-                        <li key={f} className="flex items-start gap-1.5 text-xs text-gray-700">
-                          <span className="text-green-500 font-bold mt-0.5">✓</span>{f}
-                        </li>
-                      ))}
-                    </ul>
-                    <button
-                      onClick={() => void handleRequestUpgrade('pro')}
-                      disabled={upgrading || institute.plan === 'pro' || !!pendingUpgrade}
-                      className="w-full bg-purple-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors">
-                      {upgrading ? 'Submitting…'
-                        : institute.plan === 'pro' ? 'Current Plan'
-                        : pendingUpgrade?.requested_plan === 'pro' ? '⏳ Request Pending'
-                        : pendingUpgrade ? 'Another Request Pending'
-                        : 'Request Upgrade →'}
-                    </button>
-                  </div>
-                </div>
-
-                <p className="text-center text-xs text-gray-400 mt-4">
-                  📩 Your request is reviewed by our team · Usually approved within 24 hours
-                </p>
-              </>
-            )}
-          </div>
-        </div>
-      )}
+      {/* ── Upgrade Modal is rendered once above near the QR modal ─────────── */}
 
       {/* ── Leads Tab ────────────────────────────────────────────────────────── */}
       {activeTab === 'leads' && (
@@ -1282,7 +1306,7 @@ export default function Dashboard() {
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📊</div>
               <h3 className="text-xl font-bold text-gray-900 mb-2">Analytics is an Advanced Feature</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Advanced plan</span> to unlock
+                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to unlock
                 lead trends, peak hour insights, conversion tracking, and more.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
@@ -1303,9 +1327,9 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Advanced — ₹1,499/month →
+                Upgrade to Growth — ₹3,999/month →
               </button>
-              <p className="text-xs text-gray-400 mt-3">Original price ₹2,999/month · Launch discount applied</p>
+              <p className="text-xs text-gray-400 mt-3">Annual plan available at ₹39,990/year — save 2 months</p>
             </div>
           ) : analyticsLoading ? (
             <div className="text-center py-20">
@@ -1571,9 +1595,9 @@ export default function Dashboard() {
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">💬</div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is an Advanced Feature</h3>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is a Growth Feature</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Advanced plan</span> to embed
+                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to embed
                 an AI-powered chat widget directly on your institute's website.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
@@ -1594,7 +1618,7 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Advanced — ₹1,499/month →
+                Upgrade to Growth — ₹3,999/month →
               </button>
             </div>
           ) : (

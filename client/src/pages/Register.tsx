@@ -1,22 +1,52 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Logo from '../components/Logo';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
+
+interface Plan {
+  id: number;
+  slug: string;
+  name: string;
+  price_monthly: number;
+  badge: string;
+}
 
 export default function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const [plans, setPlans] = useState<Plan[]>([]);
+
+  // Read ?plan=xxx from URL — pre-selects the plan the user clicked on Home page
+  const urlPlan = new URLSearchParams(location.search).get('plan') ?? 'starter';
+  const validSlugs = ['starter', 'growth', 'pro'];
+  const defaultPlan = validSlugs.includes(urlPlan) ? urlPlan : 'starter';
+
   const [form, setForm] = useState({
     name: '',
     email: '',
     phone: '',
     whatsapp_number: '',
     website: '',
-    plan: 'free',
+    plan: defaultPlan,
     password: '',
     confirmPassword: '',
   });
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    fetch(apiUrl('/api/plans'))
+      .then(r => r.json())
+      .then((data: Plan[]) => { if (Array.isArray(data) && data.length) setPlans(data); })
+      .catch(() => {
+        // Fallback static plans if API fails
+        setPlans([
+          { id: 1, slug: 'starter', name: 'Starter', price_monthly: 2499, badge: '14-Day Free Trial' },
+          { id: 2, slug: 'growth',  name: 'Growth',  price_monthly: 3999, badge: 'Most Popular' },
+          { id: 3, slug: 'pro',     name: 'Pro',     price_monthly: 8999, badge: 'Full Power' },
+        ]);
+      });
+  }, []);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -44,13 +74,20 @@ export default function Register() {
       if (!res.ok) throw new Error(data.error ?? 'Registration failed.');
 
       localStorage.setItem('institute', JSON.stringify(data));
-      navigate('/dashboard');
+      // Growth/Pro: go to dashboard with ?upgrade= flag to auto-open payment modal
+      if (form.plan === 'growth' || form.plan === 'pro') {
+        navigate(`/dashboard?upgrade=${form.plan}`);
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
       setLoading(false);
     }
   };
+
+  const selectedPlan = plans.find(p => p.slug === form.plan);
 
   return (
     <div className="min-h-[calc(100vh-3.5rem)] flex items-center justify-center bg-gray-50 px-4 py-12">
@@ -64,6 +101,19 @@ export default function Register() {
             <h1 className="text-2xl font-bold text-gray-900">Register Your Institute</h1>
             <p className="text-gray-500 text-sm mt-1">Start capturing and managing leads efficiently</p>
           </div>
+
+          {/* Trial / payment banner — dynamic per selected plan */}
+          {form.plan === 'starter' ? (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 text-center">
+              <p className="text-sm font-semibold text-indigo-800">🎉 14-Day Free Trial — No Credit Card Required</p>
+              <p className="text-xs text-indigo-600 mt-0.5">Try all Starter features free for 14 days.</p>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-center">
+              <p className="text-sm font-semibold text-amber-800">💳 Paid Plan — Payment Required After Registration</p>
+              <p className="text-xs text-amber-700 mt-0.5">You'll be taken to payment immediately after creating your account.</p>
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-6">
@@ -116,15 +166,31 @@ export default function Register() {
               <p className="text-xs text-gray-400 mt-1">We'll auto-generate your AI assistant's knowledge base from this.</p>
             </div>
 
+            {/* Plan selector */}
             <div>
-              <label htmlFor="plan" className="block text-sm font-medium text-gray-700 mb-1">Plan</label>
+              <label htmlFor="plan" className="block text-sm font-medium text-gray-700 mb-1">
+                Choose Your Plan
+              </label>
               <select id="plan" name="plan" value={form.plan} onChange={handleChange}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
-                <option value="free">Free — ₹0 (30-day trial)</option>
-                <option value="advanced" disabled>Advanced — ₹1,499/month (Launching Soon)</option>
-                <option value="pro" disabled>Pro — ₹3,499/month (Launching Soon)</option>
+                {plans.length === 0 ? (
+                  <option value="starter">Starter — ₹2,499/month</option>
+                ) : (
+                  plans.map(plan => (
+                    <option key={plan.slug} value={plan.slug}>
+                      {plan.name} — ₹{plan.price_monthly.toLocaleString('en-IN')}/month
+                      {plan.slug === 'growth' ? ' ⭐ Most Popular' : ''}
+                    </option>
+                  ))
+                )}
               </select>
-              <p className="text-xs text-gray-400 mt-1">Advanced &amp; Pro plans are launching soon. Start with the free trial.</p>
+              {selectedPlan && (
+                <p className="text-xs text-indigo-600 mt-1 font-medium">
+                  {form.plan === 'starter'
+                    ? '✓ 14-day free trial included — no credit card needed.'
+                    : `✓ Payment for ${selectedPlan.name} plan required after account creation.`}
+                </p>
+              )}
             </div>
 
             <div>
@@ -153,7 +219,7 @@ export default function Register() {
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   Registering…
                 </span>
-              ) : 'Create Account →'}
+              ) : form.plan === 'starter' ? 'Start Free Trial →' : 'Create Account & Pay →'}
             </button>
           </form>
 

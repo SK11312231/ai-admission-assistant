@@ -10,18 +10,26 @@ const PBKDF2_ITERATIONS = 100_000;
 const KEY_LENGTH = 64;
 const DIGEST = 'sha512';
 
-// ── Password helpers ─────────────────────────────────────────────────────────
+// ── Password helpers (async — avoids blocking Railway's event loop) ───────────
 
-function hashPassword(password: string): string {
+function hashPassword(password: string): Promise<string> {
   const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, DIGEST).toString('hex');
-  return `${salt}:${hash}`;
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, DIGEST, (err, key) => {
+      if (err) reject(err);
+      else resolve(`${salt}:${key.toString('hex')}`);
+    });
+  });
 }
 
-function verifyPassword(password: string, stored: string): boolean {
+function verifyPassword(password: string, stored: string): Promise<boolean> {
   const [salt, hash] = stored.split(':');
-  const computed = crypto.pbkdf2Sync(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, DIGEST).toString('hex');
-  return computed === hash;
+  return new Promise((resolve, reject) => {
+    crypto.pbkdf2(password, salt, PBKDF2_ITERATIONS, KEY_LENGTH, DIGEST, (err, key) => {
+      if (err) reject(err);
+      else resolve(key.toString('hex') === hash);
+    });
+  });
 }
 
 // ── Ensure admins table + is_active column migration ────────────────────────
@@ -74,7 +82,7 @@ router.post('/login', async (req: Request, res: Response) => {
     await ensureAdminTable();
     const result = await pool.query('SELECT * FROM admins WHERE email = $1', [email.toLowerCase().trim()]);
     const admin = result.rows[0] as { id: number; name: string; email: string; password_hash: string } | undefined;
-    if (!admin || !verifyPassword(password, admin.password_hash)) {
+    if (!admin || !await verifyPassword(password, admin.password_hash)) {
       res.status(401).json({ error: 'Invalid email or password.' });
       return;
     }
@@ -92,22 +100,27 @@ router.post('/create', async (req: Request, res: Response) => {
   const { name, email, password, bootstrapKey } = req.body as {
     name?: string; email?: string; password?: string; bootstrapKey?: string;
   };
+  console.error('req.body:', req.body);
   const expectedKey = process.env.ADMIN_BOOTSTRAP_KEY;
   if (!expectedKey || bootstrapKey !== expectedKey) {
     res.status(403).json({ error: 'Invalid bootstrap key.' });
     return;
   }
+  console.error('Found the bootstrap key:');
   if (!name || !email || !password || password.length < 8) {
     res.status(400).json({ error: 'Name, email and password (min 8 chars) are required.' });
     return;
   }
   try {
+    console.error('Entered in try statement');
     await ensureAdminTable();
-    const hash = hashPassword(password);
+    const hash = await hashPassword(password);
+    console.error('Before inserting admin:');
     await pool.query(
       'INSERT INTO admins (name, email, password_hash) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING',
       [name.trim(), email.toLowerCase().trim(), hash],
     );
+    console.error('Admin inserted successfully.');
     res.status(201).json({ success: true });
   } catch (err) {
     console.error('Create admin error:', err);
@@ -245,7 +258,7 @@ router.delete('/institutes/:id', async (req: Request, res: Response) => {
     const adminPayload = (req as Request & { admin: AdminPayload }).admin;
     const adminResult = await pool.query('SELECT password_hash FROM admins WHERE id = $1', [adminPayload.id]);
     const admin = adminResult.rows[0] as { password_hash: string } | undefined;
-    if (!admin || !verifyPassword(adminPassword, admin.password_hash)) {
+    if (!admin || !await verifyPassword(adminPassword, admin.password_hash)) {
       res.status(403).json({ error: 'Incorrect admin password.' });
       return;
     }
@@ -429,7 +442,7 @@ router.post('/admins', async (req: Request, res: Response) => {
   }
   try {
     await ensureAdminTable();
-    const hash = hashPassword(password);
+    const hash = await hashPassword(password);
     await pool.query(
       'INSERT INTO admins (name, email, password_hash) VALUES ($1, $2, $3)',
       [name.trim(), email.toLowerCase().trim(), hash],
@@ -441,18 +454,14 @@ router.post('/admins', async (req: Request, res: Response) => {
   }
 });
 
-export default router;
+// ── Plans router ──────────────────────────────────────────────────────────────
+// Mounted at:
+//   GET  /api/plans               → public (Home.tsx, Register.tsx)
+//   PATCH /api/admin/plans/:id    → protected by verifyAdmin inside this router
 
-// ── Plans router (exported separately) ───────────────────────────────────────
-// Mount in index.ts:
-//   import plansRouter from './routes/admin';  ← or from a dedicated plans.ts
-//   app.use('/api/plans', plansRouter);         ← public GET
-//   app.use('/api/admin/plans', verifyAdmin, adminPlansRouter); ← protected PATCH
+export const plansRouter = Router(); // ← separate instance, no verifyAdmin applied globally
 
-import { Router as PlansRouter } from 'express';
-export const plansRouter = PlansRouter();
-
-// GET /api/plans — public, used by Home.tsx and Register.tsx on load
+// GET /api/plans — public, returns all active plans
 plansRouter.get('/', async (_req: Request, res: Response) => {
   try {
     const result = await pool.query(
@@ -518,3 +527,5 @@ plansRouter.patch('/:id', verifyAdmin, async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to update plan.' });
   }
 });
+
+export default router;
