@@ -287,6 +287,60 @@ export async function initDB(): Promise<void> {
   `);
   console.log('  ✅ messages table ready');
 
+  // ── 11. admins ────────────────────────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS admins (
+      id            SERIAL PRIMARY KEY,
+      name          TEXT NOT NULL,
+      email         TEXT UNIQUE NOT NULL,
+      password_hash TEXT NOT NULL,
+      created_at    TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  console.log('  ✅ admins table ready');
+
+  // ── 12. payments ──────────────────────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS payments (
+      id                   SERIAL PRIMARY KEY,
+      institute_id         INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      razorpay_order_id    TEXT    NOT NULL UNIQUE,
+      razorpay_payment_id  TEXT,
+      plan                 TEXT    NOT NULL,
+      billing_cycle        TEXT    NOT NULL CHECK (billing_cycle IN ('monthly', 'annual')),
+      amount_inr           INTEGER NOT NULL,
+      status               TEXT    NOT NULL DEFAULT 'pending'
+                             CHECK (status IN ('pending', 'success', 'failed')),
+      paid_at              TIMESTAMPTZ,
+      created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_payments_institute
+      ON payments (institute_id, status)
+  `);
+  console.log('  ✅ payments table ready');
+
+  // ── 13. subscriptions ─────────────────────────────────────────────────────
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS subscriptions (
+      id                   SERIAL PRIMARY KEY,
+      institute_id         INTEGER NOT NULL UNIQUE REFERENCES institutes(id) ON DELETE CASCADE,
+      plan                 TEXT    NOT NULL,
+      billing_cycle        TEXT    NOT NULL CHECK (billing_cycle IN ('monthly', 'annual')),
+      amount_inr           INTEGER NOT NULL,
+      started_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      expires_at           TIMESTAMPTZ NOT NULL,
+      razorpay_order_id    TEXT,
+      razorpay_payment_id  TEXT,
+      status               TEXT    NOT NULL DEFAULT 'active'
+                             CHECK (status IN ('active', 'expired', 'cancelled')),
+      created_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at           TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('  ✅ subscriptions table ready');
+
   console.log('✅ initDB() complete — all tables ready.');
 }
 

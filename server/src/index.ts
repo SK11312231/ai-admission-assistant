@@ -16,6 +16,7 @@ import blocklistRouter from './routes/blocklist';
 import analyticsRouter from './routes/analytics';
 import widgetRouter from './routes/widget';
 import adminRouter, { plansRouter } from './routes/admin';
+import paymentRouter from './routes/payment';
 import embeddedSignupRouter from './routes/embeddedSignup';
 import trainingRouter from './routes/chatTraining';  // ← AI Training feature
 
@@ -72,6 +73,7 @@ app.use('/api/whatsapp', defaultLimiter, embeddedSignupRouter);  // ← Meta Emb
 app.use('/api/widget', widgetRouter);
 app.use('/api/admin', defaultLimiter, adminRouter);
 app.use('/api/plans', defaultLimiter, plansRouter);  // ← public plans endpoint (Home, Register)
+app.use('/api/payment', defaultLimiter, paymentRouter); // ← Razorpay payment integration
 app.use('/api/webhook', webhookRouter);
 
 // Health check
