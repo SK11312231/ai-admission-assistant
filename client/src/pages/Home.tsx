@@ -194,7 +194,7 @@ export default function Home() {
         <div className="max-w-5xl mx-auto">
           <h2 className="text-3xl font-bold text-center text-gray-900 mb-3">Simple, Transparent Pricing</h2>
           <p className="text-center text-gray-500 mb-3 max-w-lg mx-auto">
-            Try free for 14 days on our Growth plan. No credit card required.
+            Starter plan includes a 14-day free trial. Growth & Pro are paid plans.
           </p>
           <p className="text-center mb-12">
             <span className="inline-block bg-green-50 border border-green-200 text-green-700 text-xs font-semibold px-3 py-1 rounded-full">
@@ -263,7 +263,7 @@ export default function Home() {
                 <div className="px-6 pb-6 bg-white">
                   {plan.slug === 'starter' ? (
                     <>
-                      <Link to="/register"
+                      <Link to={`/register?plan=${plan.slug}`}
                         className="block text-center py-2.5 rounded-xl text-sm font-semibold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors">
                         Start 14-Day Free Trial →
                       </Link>
@@ -273,7 +273,7 @@ export default function Home() {
                     </>
                   ) : (
                     <>
-                      <Link to="/register"
+                      <Link to={`/register?plan=${plan.slug}`}
                         className={`block text-center py-2.5 rounded-xl text-sm font-semibold transition-colors ${
                           plan.is_popular
                             ? 'bg-indigo-600 text-white hover:bg-indigo-700'
@@ -282,7 +282,7 @@ export default function Home() {
                         Get Started →
                       </Link>
                       <p className="text-center text-xs text-gray-400 mt-2">
-                        Start with a 14-day trial first
+                        💳 One-time setup · Pay after registration
                       </p>
                     </>
                   )}

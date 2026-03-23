@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import Logo from '../components/Logo';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, Link, useLocation } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 
 interface Plan {
@@ -13,14 +13,21 @@ interface Plan {
 
 export default function Register() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [plans, setPlans] = useState<Plan[]>([]);
+
+  // Read ?plan=xxx from URL — pre-selects the plan the user clicked on Home page
+  const urlPlan = new URLSearchParams(location.search).get('plan') ?? 'starter';
+  const validSlugs = ['starter', 'growth', 'pro'];
+  const defaultPlan = validSlugs.includes(urlPlan) ? urlPlan : 'starter';
+
   const [form, setForm] = useState({
     name: '',
     email: '',
     phone: '',
     whatsapp_number: '',
     website: '',
-    plan: 'starter',
+    plan: defaultPlan,
     password: '',
     confirmPassword: '',
   });
@@ -67,7 +74,12 @@ export default function Register() {
       if (!res.ok) throw new Error(data.error ?? 'Registration failed.');
 
       localStorage.setItem('institute', JSON.stringify(data));
-      navigate('/dashboard');
+      // Growth/Pro: go to dashboard with ?upgrade= flag to auto-open payment modal
+      if (form.plan === 'growth' || form.plan === 'pro') {
+        navigate(`/dashboard?upgrade=${form.plan}`);
+      } else {
+        navigate('/dashboard');
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Something went wrong.');
     } finally {
@@ -90,11 +102,18 @@ export default function Register() {
             <p className="text-gray-500 text-sm mt-1">Start capturing and managing leads efficiently</p>
           </div>
 
-          {/* Trial banner */}
-          <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 text-center">
-            <p className="text-sm font-semibold text-indigo-800">🎉 14-Day Free Trial — No Credit Card Required</p>
-            <p className="text-xs text-indigo-600 mt-0.5">Full Growth plan features unlocked during your trial.</p>
-          </div>
+          {/* Trial / payment banner — dynamic per selected plan */}
+          {form.plan === 'starter' ? (
+            <div className="bg-indigo-50 border border-indigo-200 rounded-xl px-4 py-3 mb-6 text-center">
+              <p className="text-sm font-semibold text-indigo-800">🎉 14-Day Free Trial — No Credit Card Required</p>
+              <p className="text-xs text-indigo-600 mt-0.5">Try all Starter features free for 14 days.</p>
+            </div>
+          ) : (
+            <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 mb-6 text-center">
+              <p className="text-sm font-semibold text-amber-800">💳 Paid Plan — Payment Required After Registration</p>
+              <p className="text-xs text-amber-700 mt-0.5">You'll be taken to payment immediately after creating your account.</p>
+            </div>
+          )}
 
           {error && (
             <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-6">
@@ -167,7 +186,9 @@ export default function Register() {
               </select>
               {selectedPlan && (
                 <p className="text-xs text-indigo-600 mt-1 font-medium">
-                  ✓ Your 14-day trial gives you full Growth features regardless of the plan you choose.
+                  {form.plan === 'starter'
+                    ? '✓ 14-day free trial included — no credit card needed.'
+                    : `✓ Payment for ${selectedPlan.name} plan required after account creation.`}
                 </p>
               )}
             </div>
@@ -198,7 +219,7 @@ export default function Register() {
                   <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                   Registering…
                 </span>
-              ) : 'Start Free Trial →'}
+              ) : form.plan === 'starter' ? 'Start Free Trial →' : 'Create Account & Pay →'}
             </button>
           </form>
 

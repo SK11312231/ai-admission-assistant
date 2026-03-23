@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
@@ -141,6 +141,7 @@ function formatFollowUp(date: string | null): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [institute, setInstitute] = useState<Institute | null>(null);
   const [profileCompleteness, setProfileCompleteness] = useState<{
     complete: boolean; score: number; missing: string[]; present: string[];
@@ -266,6 +267,22 @@ export default function Dashboard() {
       finally { setLoading(false); }
     })();
   }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ── Auto-open payment modal when redirected from Register with ?upgrade=plan ─
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    const upgradePlan = params.get('upgrade');
+    if (upgradePlan && ['growth', 'pro'].includes(upgradePlan)) {
+      // Small delay to let dashboard fully load first
+      const t = setTimeout(() => {
+        setSelectedBilling('monthly');
+        setShowUpgradeModal(true);
+        // Clean the URL without triggering a re-render
+        window.history.replaceState({}, '', '/dashboard');
+      }, 800);
+      return () => clearTimeout(t);
+    }
+  }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Profile tab load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -591,11 +608,13 @@ export default function Dashboard() {
   if (!institute) return null;
 
   const isPaid = isPremium(institute.plan);
-  const trialLeft = institute.created_at ? getTrialDaysLeft(institute.created_at) : 30;
-  const trialExpired = institute.created_at ? isTrialExpired(institute.created_at) : false;
-  // Premium features accessible during trial OR on paid plan
-  const premiumUnlocked = isPaid || !trialExpired;
-  const trialPercent = institute.created_at
+  const isStarter = institute.plan === 'starter';
+  // Trial only applies to Starter plan — Growth/Pro require payment
+  const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
+  const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : !isStarter;
+  // Premium features unlocked if: paid plan OR starter still in trial window
+  const premiumUnlocked = isPaid || (isStarter && !trialExpired);
+  const trialPercent = isStarter && institute.created_at
     ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
     : 0;
 
@@ -891,25 +910,38 @@ export default function Dashboard() {
         {/* Upgrade card */}
         {!isPaid && (
           <div style={{ margin: '14px 10px 0', background: '#0e0d17', border: '1px solid #1e1c30', borderRadius: '10px', padding: '12px' }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
-              <span style={{ fontSize: '11px', fontWeight: 500, color: '#8884a0' }}>
-                {trialExpired ? 'Trial ended' : '14-day trial'}
-              </span>
-              <span style={{ fontSize: '10px', color: trialExpired ? '#a32d2d' : '#4a4768' }}>
-                {trialExpired ? 'Expired' : `${trialLeft}d left`}
-              </span>
-            </div>
-            <div style={{ height: '3px', background: '#1e1c2e', borderRadius: '2px', overflow: 'hidden', marginBottom: '8px' }}>
-              <div style={{ height: '100%', width: `${trialPercent}%`, background: trialExpired ? '#a32d2d' : '#534ab7', borderRadius: '2px' }} />
-            </div>
-            <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
-              {trialExpired
-                ? 'Premium features are locked. Upgrade to restore access.'
-                : 'Premium features are active. Upgrade before trial ends.'}
-            </p>
+            {isStarter ? (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '5px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 500, color: '#8884a0' }}>
+                    {trialExpired ? 'Trial ended' : '14-day trial'}
+                  </span>
+                  <span style={{ fontSize: '10px', color: trialExpired ? '#a32d2d' : '#4a4768' }}>
+                    {trialExpired ? 'Expired' : `${trialLeft}d left`}
+                  </span>
+                </div>
+                <div style={{ height: '3px', background: '#1e1c2e', borderRadius: '2px', overflow: 'hidden', marginBottom: '8px' }}>
+                  <div style={{ height: '100%', width: `${trialPercent}%`, background: trialExpired ? '#a32d2d' : '#534ab7', borderRadius: '2px' }} />
+                </div>
+                <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
+                  {trialExpired
+                    ? 'Trial ended. Upgrade to restore access.'
+                    : 'Trial active. Upgrade before it ends.'}
+                </p>
+              </>
+            ) : (
+              <>
+                <p style={{ fontSize: '11px', fontWeight: 600, color: '#f59e0b', marginBottom: '4px' }}>
+                  💳 Payment required
+                </p>
+                <p style={{ fontSize: '10px', color: '#4a4768', marginBottom: '9px', lineHeight: '1.4' }}>
+                  Complete payment to activate your {institute.plan} plan features.
+                </p>
+              </>
+            )}
             <button onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
               style={{ width: '100%', background: trialExpired ? '#4a2020' : '#1f1c30', border: `1px solid ${trialExpired ? '#6b2020' : '#2d2a42'}`, borderRadius: '6px', color: trialExpired ? '#f09595' : '#afa9ec', fontSize: '11px', fontWeight: 500, padding: '7px', cursor: 'pointer' }}>
-              {trialExpired ? '🔓 Unlock features →' : 'Upgrade plan →'}
+              {!isStarter ? '💳 Pay & Activate →' : trialExpired ? '🔓 Unlock features →' : 'Upgrade plan →'}
             </button>
           </div>
         )}
