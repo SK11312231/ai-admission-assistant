@@ -143,6 +143,7 @@ export default function Dashboard() {
   const navigate = useNavigate();
   const location = useLocation();
   const [institute, setInstitute] = useState<Institute | null>(null);
+  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState<{
     complete: boolean; score: number; missing: string[]; present: string[];
   } | null>(null);
@@ -258,6 +259,15 @@ export default function Dashboard() {
         setLeads(await res.json() as Lead[]);
       } catch { /* silent */ }
 
+      // Fetch active subscription — determines if Growth/Pro features are unlocked
+      try {
+        const subRes = await fetch(apiUrl(`/api/payment/subscription/${inst.id}`));
+        if (subRes.ok) {
+          const sub = await subRes.json() as { status: string } | null;
+          setHasActiveSubscription(sub?.status === 'active');
+        }
+      } catch { /* silent */ }
+
       // Fetch profile completeness
       try {
         const cRes = await fetch(apiUrl(`/api/institutes/${inst.id}/profile-completeness`));
@@ -268,18 +278,17 @@ export default function Dashboard() {
     })();
   }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Auto-open payment modal when redirected from Register with ?upgrade=plan ─
+  // ── Auto-open payment for Growth/Pro when redirected from Register ───────────
   useEffect(() => {
     const params = new URLSearchParams(location.search);
-    const upgradePlan = params.get('upgrade');
+    const upgradePlan = params.get('upgrade') as 'growth' | 'pro' | null;
     if (upgradePlan && ['growth', 'pro'].includes(upgradePlan)) {
-      // Small delay to let dashboard fully load first
+      // Clean the URL immediately
+      window.history.replaceState({}, '', '/dashboard');
+      // Delay to let dashboard fully load, then go straight to Razorpay checkout
       const t = setTimeout(() => {
-        setSelectedBilling('monthly');
-        setShowUpgradeModal(true);
-        // Clean the URL without triggering a re-render
-        window.history.replaceState({}, '', '/dashboard');
-      }, 800);
+        void handlePayAndUpgrade(upgradePlan);
+      }, 1000);
       return () => clearTimeout(t);
     }
   }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -562,6 +571,7 @@ export default function Dashboard() {
             const updated = { ...institute, plan: verifyData.plan };
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
+            setHasActiveSubscription(true); // payment confirmed
             setUpgradeSuccess(true);
             setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 4000);
           } catch (err) {
@@ -607,12 +617,14 @@ export default function Dashboard() {
 
   if (!institute) return null;
 
-  const isPaid = isPremium(institute.plan);
   const isStarter = institute.plan === 'starter';
+  // isPaid = true only if there's a confirmed active subscription in DB
+  // Starter plan doesn't need a subscription — it uses the trial window
+  const isPaid = isStarter ? false : hasActiveSubscription;
   // Trial only applies to Starter plan — Growth/Pro require payment
   const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
   const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : !isStarter;
-  // Premium features unlocked if: paid plan OR starter still in trial window
+  // Premium features unlocked if: paid subscription OR starter still in trial window
   const premiumUnlocked = isPaid || (isStarter && !trialExpired);
   const trialPercent = isStarter && institute.created_at
     ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
@@ -773,10 +785,11 @@ export default function Dashboard() {
 
                 <div className="grid sm:grid-cols-2 gap-4">
                   {/* Growth */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'growth' ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200 transition-colors'}`}>
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'growth' && isPaid ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200 transition-colors'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Growth</span>
-                      {institute.plan === 'growth' && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {institute.plan === 'growth' && isPaid && <span className="text-xs bg-indigo-100 text-indigo-700 font-semibold px-2 py-0.5 rounded-full">✅ Active</span>}
+                      {institute.plan === 'growth' && !isPaid && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⚠️ Unpaid</span>}
                     </div>
                     <div className="flex items-end gap-1 mb-0.5">
                       <span className="text-2xl font-extrabold text-gray-900">
@@ -794,20 +807,21 @@ export default function Dashboard() {
                       ))}
                     </ul>
                     <button onClick={() => void handlePayAndUpgrade('growth')}
-                      disabled={upgrading || institute.plan === 'growth' || institute.plan === 'pro'}
+                      disabled={upgrading || (institute.plan === 'growth' && isPaid) || (institute.plan === 'pro' && isPaid)}
                       className="w-full bg-indigo-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
                       {upgrading ? <span className="flex items-center justify-center gap-2"><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>Processing…</span>
-                        : institute.plan === 'growth' ? 'Current Plan'
-                        : institute.plan === 'pro' ? 'Already on Pro'
-                        : '💳 Pay & Upgrade →'}
+                        : (institute.plan === 'growth' && isPaid) ? 'Active Plan'
+                        : (institute.plan === 'pro' && isPaid) ? 'Downgrade not available'
+                        : '💳 Pay & Activate →'}
                     </button>
                   </div>
 
                   {/* Pro */}
-                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:border-purple-200 transition-colors'}`}>
+                  <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'pro' && isPaid ? 'border-purple-400 bg-purple-50' : 'border-gray-200 hover:border-purple-200 transition-colors'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-bold text-purple-600 uppercase tracking-widest">Pro</span>
-                      {institute.plan === 'pro' && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">Current</span>}
+                      {institute.plan === 'pro' && isPaid && <span className="text-xs bg-purple-100 text-purple-700 font-semibold px-2 py-0.5 rounded-full">✅ Active</span>}
+                      {institute.plan === 'pro' && !isPaid && <span className="text-xs bg-amber-100 text-amber-700 font-semibold px-2 py-0.5 rounded-full">⚠️ Unpaid</span>}
                     </div>
                     <div className="flex items-end gap-1 mb-0.5">
                       <span className="text-2xl font-extrabold text-gray-900">
@@ -825,11 +839,11 @@ export default function Dashboard() {
                       ))}
                     </ul>
                     <button onClick={() => void handlePayAndUpgrade('pro')}
-                      disabled={upgrading || institute.plan === 'pro'}
+                      disabled={upgrading || (institute.plan === 'pro' && isPaid)}
                       className="w-full bg-purple-600 text-white text-sm font-semibold py-2 rounded-xl hover:bg-purple-700 disabled:opacity-50 transition-colors">
                       {upgrading ? <span className="flex items-center justify-center gap-2"><span className="w-3 h-3 border-2 border-white border-t-transparent rounded-full animate-spin"/>Processing…</span>
-                        : institute.plan === 'pro' ? 'Current Plan'
-                        : '💳 Pay & Upgrade →'}
+                        : (institute.plan === 'pro' && isPaid) ? 'Active Plan'
+                        : '💳 Pay & Activate →'}
                     </button>
                   </div>
                 </div>
