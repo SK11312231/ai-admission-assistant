@@ -100,22 +100,27 @@ router.post('/create', async (req: Request, res: Response) => {
   const { name, email, password, bootstrapKey } = req.body as {
     name?: string; email?: string; password?: string; bootstrapKey?: string;
   };
+  console.error('req.body:', req.body);
   const expectedKey = process.env.ADMIN_BOOTSTRAP_KEY;
   if (!expectedKey || bootstrapKey !== expectedKey) {
     res.status(403).json({ error: 'Invalid bootstrap key.' });
     return;
   }
+  console.error('Found the bootstrap key:');
   if (!name || !email || !password || password.length < 8) {
     res.status(400).json({ error: 'Name, email and password (min 8 chars) are required.' });
     return;
   }
   try {
+    console.error('Entered in try statement');
     await ensureAdminTable();
     const hash = await hashPassword(password);
+    console.error('Before inserting admin:');
     await pool.query(
       'INSERT INTO admins (name, email, password_hash) VALUES ($1, $2, $3) ON CONFLICT (email) DO NOTHING',
       [name.trim(), email.toLowerCase().trim(), hash],
     );
+    console.error('Admin inserted successfully.');
     res.status(201).json({ success: true });
   } catch (err) {
     console.error('Create admin error:', err);
