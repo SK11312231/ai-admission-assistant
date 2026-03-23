@@ -197,8 +197,8 @@ router.get('/institutes', async (req: Request, res: Response) => {
 router.patch('/institutes/:id/plan', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
-  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be free, advanced, or pro.' });
+  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be starter, growth, or pro.' });
     return;
   }
   try {
