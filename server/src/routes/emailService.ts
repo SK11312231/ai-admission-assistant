@@ -469,3 +469,115 @@ export async function sendDemoRequestEmail(opts: {
 
   console.log(`[Email] Demo request notification sent for: ${name} (${institute})`);
 }
+
+// ── 9. Payment Confirmation (to institute) ────────────────────────────────────
+
+export async function sendPaymentConfirmationEmail(opts: {
+  toEmail: string;
+  instituteName: string;
+  plan: string;
+  billingCycle: string;
+  amount: string;
+  expiresAt: string;
+  paymentId: string;
+  dashboardUrl?: string;
+}): Promise<void> {
+  const {
+    toEmail, instituteName, plan, billingCycle,
+    amount, expiresAt, paymentId,
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">🎉 Payment Successful!</h2>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">
+      Your InquiAI subscription has been activated. Here are your payment details.
+    </p>
+    ${infoBox(`
+      <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1f2937;">🏫 ${instituteName}</p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
+      <p style="margin:0 0 6px;font-size:13px;color:#374151;">
+        Plan: <span style="background:#ede9fe;color:#4f46e5;padding:2px 8px;border-radius:4px;font-weight:700;">${plan}</span>
+      </p>
+      <p style="margin:6px 0;font-size:13px;color:#374151;">
+        Billing: <strong>${billingCycle}</strong>
+      </p>
+      <p style="margin:6px 0;font-size:13px;color:#374151;">
+        Amount Paid: <strong style="color:#059669;">${amount}</strong>
+      </p>
+      <p style="margin:6px 0;font-size:13px;color:#374151;">
+        Valid Until: <strong>${expiresAt}</strong>
+      </p>
+      <p style="margin:6px 0 0;font-size:11px;color:#9ca3af;">Payment ID: ${paymentId}</p>
+    `, '#059669')}
+    <p style="color:#6b7280;font-size:13px;margin-top:16px;">
+      All premium features are now unlocked. Visit your dashboard to get started.
+    </p>
+    ${ctaButton('Go to Dashboard →', `${dashboardUrl}/dashboard`)}
+    <p style="color:#9ca3af;font-size:11px;margin-top:20px;">
+      Need help? Reply to this email or contact us at support@inquiai.in
+    </p>
+  `;
+
+  await sendEmail({
+    to: toEmail,
+    subject: `✅ Payment Confirmed — ${plan} Plan Activated | InquiAI`,
+    html: baseTemplate('Payment Confirmation', body),
+  });
+
+  console.log(`[Email] Payment confirmation sent to ${toEmail} (${plan} / ${billingCycle})`);
+}
+
+// ── 10. Payment Admin Notification ────────────────────────────────────────────
+
+export async function sendPaymentAdminNotificationEmail(opts: {
+  adminEmail: string;
+  instituteName: string;
+  instituteEmail: string;
+  institutePhone: string;
+  plan: string;
+  billingCycle: string;
+  amount: string;
+  paymentId: string;
+  orderId: string;
+}): Promise<void> {
+  const {
+    adminEmail, instituteName, instituteEmail, institutePhone,
+    plan, billingCycle, amount, paymentId, orderId,
+  } = opts;
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">💰 New Payment Received</h2>
+    <p style="color:#6b7280;margin:0 0 20px;font-size:14px;">
+      An institute has completed payment and their plan has been automatically upgraded.
+    </p>
+    ${infoBox(`
+      <p style="margin:0 0 10px;font-size:15px;font-weight:700;color:#1f2937;">🏫 ${instituteName}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">📧 ${instituteEmail}</p>
+      <p style="margin:0 0 6px;font-size:13px;color:#6b7280;">📱 ${institutePhone}</p>
+      <hr style="border:none;border-top:1px solid #e5e7eb;margin:12px 0;"/>
+      <p style="margin:0 0 6px;font-size:13px;color:#374151;">
+        Plan: <span style="background:#ede9fe;color:#4f46e5;padding:2px 8px;border-radius:4px;font-weight:700;">${plan}</span>
+      </p>
+      <p style="margin:6px 0;font-size:13px;color:#374151;">
+        Billing: <strong>${billingCycle}</strong>
+      </p>
+      <p style="margin:6px 0;font-size:13px;color:#374151;">
+        Amount: <strong style="color:#059669;">${amount}</strong>
+      </p>
+      <p style="margin:6px 0;font-size:11px;color:#9ca3af;">Payment ID: ${paymentId}</p>
+      <p style="margin:4px 0 0;font-size:11px;color:#9ca3af;">Order ID: ${orderId}</p>
+    `, '#059669')}
+    <p style="color:#6b7280;font-size:13px;margin-top:16px;">
+      The institute's plan has been automatically upgraded in the database.
+    </p>
+  `;
+
+  await sendEmail({
+    to: adminEmail,
+    subject: `💰 New Payment: ${instituteName} → ${plan} (${billingCycle})`,
+    html: baseTemplate('Payment Received', body),
+  });
+
+  console.log(`[Email] Payment admin notification sent for: ${instituteName}`);
+}
