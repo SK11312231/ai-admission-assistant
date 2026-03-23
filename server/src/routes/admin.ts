@@ -454,8 +454,8 @@ router.post('/admins', async (req: Request, res: Response) => {
 //   GET  /api/plans               → public (Home.tsx, Register.tsx)
 //   PATCH /api/admin/plans/:id    → protected by verifyAdmin inside this router
 
-import { Router as ExpressRouter } from 'express';
-export const plansRouter = ExpressRouter();
+// import { Router as ExpressRouter } from 'express';
+export const plansRouter = router;
 
 // GET /api/plans — public, returns all active plans
 plansRouter.get('/', async (_req: Request, res: Response) => {
