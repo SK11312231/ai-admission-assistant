@@ -13,7 +13,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../db';
-import { sendPaymentConfirmationEmail, sendPaymentAdminNotificationEmail } from './emailService';
+import { sendPaymentConfirmationEmail, sendPaymentAdminNotificationEmail, sendWelcomeEmail } from './emailService';
 
 const router = Router();
 
@@ -225,9 +225,9 @@ router.post('/verify', async (req: Request, res: Response) => {
       ],
     );
 
-    // Upgrade institute plan
+    // Upgrade institute plan + mark as paid
     await pool.query(
-      'UPDATE institutes SET plan = $1 WHERE id = $2',
+      'UPDATE institutes SET plan = $1, is_paid = TRUE WHERE id = $2',
       [payment.plan, institute_id],
     );
 
@@ -249,7 +249,13 @@ router.post('/verify', async (req: Request, res: Response) => {
     const cycleLabel   = payment.billing_cycle === 'annual' ? 'Annual' : 'Monthly';
     const amountFormatted = `₹${payment.amount_inr.toLocaleString('en-IN')}`;
 
-    // Send confirmation email to institute
+    // Send welcome email if this is first payment (institute was is_paid = false before)
+    void sendWelcomeEmail({
+      toEmail: inst.email,
+      instituteName: inst.name,
+    }).catch(e => console.error('[Payment] Welcome email failed:', e));
+
+    // Send payment confirmation email to institute
     void sendPaymentConfirmationEmail({
       toEmail:      inst.email,
       instituteName: inst.name,
@@ -380,7 +386,7 @@ router.post('/webhook', async (req: Request, res: Response) => {
          payRecord.amount_inr, expiresAt, orderId, paymentId],
       );
 
-      await pool.query('UPDATE institutes SET plan = $1 WHERE id = $2',
+      await pool.query('UPDATE institutes SET plan = $1, is_paid = TRUE WHERE id = $2',
         [payRecord.plan, payRecord.institute_id]);
 
       console.log(`[Webhook] ✅ Plan upgraded via webhook — institute ${payRecord.institute_id} → ${payRecord.plan}`);

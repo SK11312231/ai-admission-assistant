@@ -16,6 +16,7 @@ interface InstituteRow {
   whatsapp_number: string;
   website: string | null;
   plan: string;
+  is_paid: boolean;
   password_hash: string;
   created_at: string;
   whatsapp_connected: boolean;
@@ -66,7 +67,7 @@ router.post('/register', async (req: Request, res: Response) => {
     return;
   }
   if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: starter, growth, pro.' });
+    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
     return;
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
@@ -95,9 +96,12 @@ router.post('/register', async (req: Request, res: Response) => {
     `);
 
     const passwordHash = hashPassword(password);
+    // Starter plan gets trial (is_paid = true), Growth/Pro require payment (is_paid = false)
+    const isPaid = plan === 'starter';
+
     const result = await pool.query(
-      `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id, created_at`,
+      `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash, is_paid)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at`,
       [
         name.trim(),
         email.trim().toLowerCase(),
@@ -106,6 +110,7 @@ router.post('/register', async (req: Request, res: Response) => {
         websiteClean,
         plan,
         passwordHash,
+        isPaid,
       ]
     );
 
@@ -114,11 +119,13 @@ router.post('/register', async (req: Request, res: Response) => {
     // Fire-and-forget: enrich institute data in background (does not block registration response)
     void scrapeAndEnrich(newId, name.trim(), websiteClean);
 
-    // Fire-and-forget: send welcome email
-    void sendWelcomeEmail({
-      toEmail: email.trim().toLowerCase(),
-      instituteName: name.trim(),
-    }).catch(err => console.error('[Email] Welcome email failed:', err));
+    // Send welcome email only for Starter (paid plans get email after payment)
+    if (isPaid) {
+      void sendWelcomeEmail({
+        toEmail: email.trim().toLowerCase(),
+        instituteName: name.trim(),
+      }).catch(err => console.error('[Email] Welcome email failed:', err));
+    }
 
     res.status(201).json({
       id: newId,
@@ -128,6 +135,7 @@ router.post('/register', async (req: Request, res: Response) => {
       whatsapp_number: whatsapp_number.trim(),
       website: websiteClean,
       plan,
+      is_paid: isPaid,
       whatsapp_connected: false,
       created_at: result.rows[0].created_at as string,
     });
@@ -197,6 +205,27 @@ router.post('/login', async (req: Request, res: Response) => {
       return;
     }
 
+    // If Growth/Pro institute hasn't paid yet, redirect to complete payment
+    if (!institute.is_paid) {
+      res.status(402).json({
+        error: 'payment_pending',
+        message: 'Please complete your payment to access the dashboard.',
+        institute: {
+          id: institute.id,
+          name: institute.name,
+          email: institute.email,
+          phone: institute.phone,
+          whatsapp_number: institute.whatsapp_number,
+          website: institute.website ?? null,
+          plan: institute.plan,
+          is_paid: false,
+          whatsapp_connected: false,
+          created_at: institute.created_at,
+        },
+      });
+      return;
+    }
+
     res.json({
       id: institute.id,
       name: institute.name,
@@ -205,6 +234,7 @@ router.post('/login', async (req: Request, res: Response) => {
       whatsapp_number: institute.whatsapp_number,
       website: institute.website ?? null,
       plan: institute.plan,
+      is_paid: true,
       whatsapp_connected: institute.whatsapp_connected ?? false,
       created_at: institute.created_at,
     });
@@ -309,7 +339,7 @@ router.patch('/:id/plan', async (req: Request, res: Response) => {
   const { plan } = req.body as { plan?: string };
 
   if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: starter, growth, pro.' });
+    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
     return;
   }
 
@@ -346,12 +376,23 @@ router.post('/:id/request-upgrade', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
 
-  if (!plan || !['growth', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Requested plan must be growth or pro.' });
+  if (!plan || !['advanced', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Requested plan must be advanced or pro.' });
     return;
   }
 
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS upgrade_requests (
+        id             SERIAL PRIMARY KEY,
+        institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+        requested_plan TEXT NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at    TIMESTAMPTZ
+      )
+    `);
+
     // Fetch institute details
     const instResult = await pool.query(
       `SELECT id, name, email, phone, plan FROM institutes WHERE id = $1`,
@@ -418,6 +459,17 @@ router.post('/:id/request-upgrade', async (req: Request, res: Response) => {
 router.get('/:id/upgrade-request', async (req: Request, res: Response) => {
   const { id } = req.params;
   try {
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS upgrade_requests (
+        id             SERIAL PRIMARY KEY,
+        institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+        requested_plan TEXT NOT NULL,
+        status         TEXT NOT NULL DEFAULT 'pending',
+        created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        resolved_at    TIMESTAMPTZ
+      )
+    `);
+
     const result = await pool.query(
       `SELECT id, requested_plan, status, created_at
        FROM upgrade_requests
@@ -472,6 +524,17 @@ router.post('/forgot-password', async (req: Request, res: Response) => {
 
   try {
     // Ensure reset tokens table exists
+    await pool.query(`
+      CREATE TABLE IF NOT EXISTS password_reset_tokens (
+        id          SERIAL PRIMARY KEY,
+        institute_id INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+        token       TEXT NOT NULL UNIQUE,
+        expires_at  TIMESTAMPTZ NOT NULL,
+        used        BOOLEAN NOT NULL DEFAULT FALSE,
+        created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+      )
+    `);
+
     const result = await pool.query(
       'SELECT id, name, email FROM institutes WHERE email = $1',
       [email.trim().toLowerCase()],

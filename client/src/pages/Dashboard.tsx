@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
@@ -43,6 +43,7 @@ interface Institute {
   whatsapp_number: string;
   website: string | null;
   plan: string;
+  is_paid: boolean;
   whatsapp_connected: boolean;
   whatsapp_waba_id?: string | null;
   whatsapp_phone_number_id?: string | null;
@@ -138,7 +139,6 @@ function formatFollowUp(date: string | null): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [institute, setInstitute] = useState<Institute | null>(null);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState<{
@@ -219,6 +219,13 @@ export default function Dashboard() {
     const stored = localStorage.getItem('institute');
     if (!stored) { navigate('/login'); return; }
     const inst = JSON.parse(stored) as Institute;
+
+    // Guard: Growth/Pro without payment → redirect to complete payment
+    if (inst.plan !== 'starter' && inst.is_paid === false) {
+      navigate('/complete-payment');
+      return;
+    }
+
     setInstitute(inst);
 
     void (async () => {
@@ -274,21 +281,6 @@ export default function Dashboard() {
       finally { setLoading(false); }
     })();
   }, [navigate]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Auto-open payment for Growth/Pro when redirected from Register ───────────
-  useEffect(() => {
-    const params = new URLSearchParams(location.search);
-    const upgradePlan = params.get('upgrade') as 'growth' | 'pro' | null;
-    if (upgradePlan && ['growth', 'pro'].includes(upgradePlan)) {
-      // Clean the URL immediately
-      window.history.replaceState({}, '', '/dashboard');
-      // Delay to let dashboard fully load, then go straight to Razorpay checkout
-      const t = setTimeout(() => {
-        void handlePayAndUpgrade(upgradePlan);
-      }, 1000);
-      return () => clearTimeout(t);
-    }
-  }, [location.search]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Profile tab load ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -564,8 +556,8 @@ export default function Dashboard() {
             };
             if (!verifyRes.ok) throw new Error(verifyData.error ?? 'Verification failed.');
 
-            // Update local institute state
-            const updated = { ...institute, plan: verifyData.plan };
+            // Update local institute state with is_paid = true
+            const updated = { ...institute, plan: verifyData.plan, is_paid: true };
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
             setHasActiveSubscription(true); // payment confirmed
@@ -615,13 +607,13 @@ export default function Dashboard() {
   if (!institute) return null;
 
   const isStarter = institute.plan === 'starter';
-  // isPaid = true only if there's a confirmed active subscription in DB
-  // Starter plan doesn't need a subscription — it uses the trial window
-  const isPaid = isStarter ? false : hasActiveSubscription;
+  // isPaid: directly from DB via institute.is_paid (set by payment verification, cleared by scheduler on expiry)
+  // hasActiveSubscription from API is a secondary check used for display only
+  const isPaid = institute.is_paid ?? hasActiveSubscription;
   // Trial only applies to Starter plan — Growth/Pro require payment
   const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
-  const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : !isStarter;
-  // Premium features unlocked if: paid subscription OR starter still in trial window
+  const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : false;
+  // Premium features: paid OR starter still in trial
   const premiumUnlocked = isPaid || (isStarter && !trialExpired);
   const trialPercent = isStarter && institute.created_at
     ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
