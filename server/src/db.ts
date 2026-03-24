@@ -345,6 +345,24 @@ export async function initDB(): Promise<void> {
   `);
   console.log('  ✅ subscriptions table ready');
 
+  // ── 14. ai_response_usage ─────────────────────────────────────────────────
+  // Tracks monthly AI response count per institute for plan limit enforcement
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_response_usage (
+      id             SERIAL PRIMARY KEY,
+      institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      year_month     TEXT    NOT NULL,          -- e.g. '2025-05'
+      response_count INTEGER NOT NULL DEFAULT 0,
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(institute_id, year_month)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_institute_month
+      ON ai_response_usage (institute_id, year_month)
+  `);
+  console.log('  ✅ ai_response_usage table ready');
+
   console.log('✅ initDB() complete — all tables ready.');
 }
 

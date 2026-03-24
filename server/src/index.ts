@@ -5,6 +5,7 @@ import path from 'path';
 import fs from 'fs';
 import rateLimit from 'express-rate-limit';
 import pool, { initDB } from './db';
+import { getLimits, getInstitutePlan } from './routes/planLimits';
 import { seed } from './seed';
 import institutesRouter from './routes/institutes';
 import { restoreAllSessions } from './routes/whatsappManager';
@@ -16,9 +17,9 @@ import blocklistRouter from './routes/blocklist';
 import analyticsRouter from './routes/analytics';
 import widgetRouter from './routes/widget';
 import adminRouter, { plansRouter } from './routes/admin';
-import paymentRouter from './routes/payment';
 import embeddedSignupRouter from './routes/embeddedSignup';
 import trainingRouter from './routes/chatTraining';  // ← AI Training feature
+import paymentRouter from './routes/payment';         // ← Razorpay payment
 
 const app = express();
 app.set('trust proxy', 1);
@@ -68,12 +69,35 @@ app.use('/api/leads', defaultLimiter, leadsRouter);
 app.use('/api/chat', defaultLimiter, chatRouter);
 app.use('/api/blocklist', defaultLimiter, blocklistRouter);
 app.use('/api/analytics', defaultLimiter, analyticsRouter);
-app.use('/api/training', defaultLimiter, trainingRouter);  // ← AI Training feature
+// AI Training is a Growth/Pro feature — gate it at the router level
+const trainingPlanGate = async (req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) => {
+  // Extract institute_id from body or query
+  const instituteId = Number(
+    (req.body as Record<string, unknown>)?.institute_id ??
+    req.query.institute_id ??
+    req.params.instituteId ?? 0
+  );
+  if (!instituteId) { next(); return; } // let route handler give proper error
+  try {
+    const plan = await getInstitutePlan(instituteId);
+    const limits = getLimits(plan);
+    if (!limits.ai_training) {
+      res.status(403).json({
+        error: 'AI Training is a Growth plan feature. Upgrade to access.',
+        code: 'PLAN_UPGRADE_REQUIRED',
+        required_plan: 'growth',
+      });
+      return;
+    }
+  } catch { /* fail open — let route handle */ }
+  next();
+};
+app.use('/api/training', defaultLimiter, trainingPlanGate, trainingRouter);  // ← AI Training feature
 app.use('/api/whatsapp', defaultLimiter, embeddedSignupRouter);  // ← Meta Embedded Signup
 app.use('/api/widget', widgetRouter);
 app.use('/api/admin', defaultLimiter, adminRouter);
-app.use('/api/plans', defaultLimiter, plansRouter);  // ← public plans endpoint (Home, Register)
-app.use('/api/payment', defaultLimiter, paymentRouter); // ← Razorpay payment integration
+app.use('/api/plans', defaultLimiter, plansRouter);      // ← public plans endpoint
+app.use('/api/payment', defaultLimiter, paymentRouter);  // ← Razorpay payments
 app.use('/api/webhook', webhookRouter);
 
 // Health check
