@@ -32,7 +32,7 @@ type PlanSlug = keyof typeof PLAN_PRICING;
 interface Institute {
   id: number; name: string; email: string; phone: string;
   whatsapp_number: string; website: string | null;
-  plan: string; is_paid: boolean; created_at: string;
+  plan: string; is_paid: boolean; is_premium_accessible: boolean; created_at: string;
 }
 
 export default function CompletePayment() {
@@ -117,7 +117,8 @@ export default function CompletePayment() {
             if (!verifyRes.ok) throw new Error(verifyData.error ?? 'Verification failed.');
 
             // Update localStorage with paid status
-            const updated = { ...institute, plan: verifyData.plan, is_paid: true };
+            const isPremiumPlan = ['growth', 'pro'].includes(verifyData.plan);
+            const updated = { ...institute, plan: verifyData.plan, is_paid: true, is_premium_accessible: isPremiumPlan };
             localStorage.setItem('institute', JSON.stringify(updated));
             setSuccess(true);
             setTimeout(() => navigate('/dashboard'), 2500);

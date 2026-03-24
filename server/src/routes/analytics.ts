@@ -1,12 +1,32 @@
 import { Router, Request, Response } from 'express';
 import pool from '../db';
+import { getLimits, getInstitutePlan } from './planLimits';
 
 const router = Router();
+
+// ── Plan gate middleware for analytics ───────────────────────────────────────
+// Analytics is a Growth/Pro feature — Starter gets 403
+
+async function requireAnalyticsPlan(req: Request, res: Response, next: () => void): Promise<void> {
+  const instituteId = Number(req.params.instituteId);
+  if (!instituteId) { res.status(400).json({ error: 'Invalid institute ID.' }); return; }
+  const plan = await getInstitutePlan(instituteId);
+  const limits = getLimits(plan);
+  if (!limits.analytics) {
+    res.status(403).json({
+      error: 'Analytics is a Growth plan feature. Upgrade to access.',
+      code: 'PLAN_UPGRADE_REQUIRED',
+      required_plan: 'growth',
+    });
+    return;
+  }
+  next();
+}
 
 // ── GET /api/analytics/:instituteId/overview ─────────────────────────────────
 // KPI cards: total leads, conversion rate, leads this week, avg daily
 
-router.get('/:instituteId/overview', async (req: Request, res: Response) => {
+router.get('/:instituteId/overview', requireAnalyticsPlan, async (req: Request, res: Response) => {
   const { instituteId } = req.params;
   const id = Number(instituteId);
 
@@ -68,7 +88,7 @@ router.get('/:instituteId/overview', async (req: Request, res: Response) => {
 // ── GET /api/analytics/:instituteId/leads-over-time?days=7|30 ───────────────
 // Daily lead counts for sparkline/line chart
 
-router.get('/:instituteId/leads-over-time', async (req: Request, res: Response) => {
+router.get('/:instituteId/leads-over-time', requireAnalyticsPlan, async (req: Request, res: Response) => {
   const { instituteId } = req.params;
   const days = req.query.days === '30' ? 30 : 7;
   const id = Number(instituteId);
@@ -110,7 +130,7 @@ router.get('/:instituteId/leads-over-time', async (req: Request, res: Response) 
 // ── GET /api/analytics/:instituteId/peak-hours ───────────────────────────────
 // Message counts grouped by hour of day (IST)
 
-router.get('/:instituteId/peak-hours', async (req: Request, res: Response) => {
+router.get('/:instituteId/peak-hours', requireAnalyticsPlan, async (req: Request, res: Response) => {
   const { instituteId } = req.params;
   const id = Number(instituteId);
 
@@ -148,7 +168,7 @@ router.get('/:instituteId/peak-hours', async (req: Request, res: Response) => {
 // ── GET /api/analytics/:instituteId/status-breakdown ────────────────────────
 // Donut chart data
 
-router.get('/:instituteId/status-breakdown', async (req: Request, res: Response) => {
+router.get('/:instituteId/status-breakdown', requireAnalyticsPlan, async (req: Request, res: Response) => {
   const { instituteId } = req.params;
   const id = Number(instituteId);
 

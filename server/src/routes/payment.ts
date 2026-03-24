@@ -226,9 +226,11 @@ router.post('/verify', async (req: Request, res: Response) => {
     );
 
     // Upgrade institute plan + mark as paid
+    // is_premium_accessible only set for Growth/Pro — Starter never gets premium features
+    const isPremiumPlan = ['growth', 'pro'].includes(payment.plan);
     await pool.query(
-      'UPDATE institutes SET plan = $1, is_paid = TRUE WHERE id = $2',
-      [payment.plan, institute_id],
+      'UPDATE institutes SET plan = $1, is_paid = TRUE, is_premium_accessible = $2 WHERE id = $3',
+      [payment.plan, isPremiumPlan, institute_id],
     );
 
     // Mark any pending upgrade requests as approved
@@ -386,8 +388,9 @@ router.post('/webhook', async (req: Request, res: Response) => {
          payRecord.amount_inr, expiresAt, orderId, paymentId],
       );
 
-      await pool.query('UPDATE institutes SET plan = $1, is_paid = TRUE WHERE id = $2',
-        [payRecord.plan, payRecord.institute_id]);
+      const isPremiumPlan = ['growth', 'pro'].includes(payRecord.plan);
+      await pool.query('UPDATE institutes SET plan = $1, is_paid = TRUE, is_premium_accessible = $2 WHERE id = $3',
+        [payRecord.plan, isPremiumPlan, payRecord.institute_id]);
 
       console.log(`[Webhook] ✅ Plan upgraded via webhook — institute ${payRecord.institute_id} → ${payRecord.plan}`);
     } catch (err) {

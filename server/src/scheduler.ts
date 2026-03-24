@@ -5,6 +5,183 @@ import {
   sendNoReplyReminderEmail,
   sendWeeklySummaryEmail,
 } from './routes/emailService';
+import { sendMessageToStudent, getAIReply } from './routes/whatsappManager';
+import { getLimits, getInstitutePlan } from './routes/planLimits';
+
+// ── Auto Follow-up Sequences ──────────────────────────────────────────────────
+// Runs every hour — finds leads overdue for step 1 or step 2, sends messages
+
+async function runFollowUpSequences(): Promise<void> {
+  console.log('[Scheduler] Running follow-up sequences check...');
+  let sent = 0;
+
+  try {
+    // Find all institutes with sequences enabled (Growth+ plan only)
+    const seqResult = await pool.query(`
+      SELECT fs.institute_id, fs.step1_delay_hours, fs.step1_message,
+             fs.step2_delay_hours, fs.step2_message,
+             i.plan, i.is_paid
+      FROM follow_up_sequences fs
+      JOIN institutes i ON i.id = fs.institute_id
+      WHERE fs.is_enabled = TRUE
+        AND i.is_active = TRUE
+        AND i.is_paid = TRUE
+    `);
+
+    for (const seq of seqResult.rows) {
+      const instituteId: number = seq.institute_id;
+
+      // Verify plan allows sequences
+      const limits = getLimits(seq.plan as string);
+      if (!limits.follow_up_sequences) continue;
+
+      // ── Step 1 candidates ────────────────────────────────────────────────
+      // Leads where:
+      //   - status = 'new' (not yet contacted)
+      //   - last_activity_at is older than step1_delay_hours
+      //   - step 1 has NOT been executed yet
+      const step1Leads = await pool.query(`
+        SELECT l.id, l.student_phone, l.student_name, l.message, l.institute_id
+        FROM leads l
+        WHERE l.institute_id = $1
+          AND l.status = 'new'
+          AND l.last_activity_at < NOW() - ($2 || ' hours')::interval
+          AND NOT EXISTS (
+            SELECT 1 FROM sequence_executions se
+            WHERE se.lead_id = l.id AND se.step = 1
+          )
+      `, [instituteId, seq.step1_delay_hours]);
+
+      for (const lead of step1Leads.rows) {
+        try {
+          const msg = await buildFollowUpMessage(lead, seq.step1_message as string | null, 1);
+          const delivered = await sendMessageToStudent(
+            String(instituteId),
+            `${lead.student_phone as string}@c.us`,
+            msg,
+          );
+
+          if (delivered) {
+            await recordExecution(lead.id as number, instituteId, 1, msg);
+            await pool.query(
+              `UPDATE leads SET last_activity_at = NOW() WHERE id = $1`,
+              [lead.id],
+            );
+            sent++;
+            console.log(`[Sequences] Step 1 sent → lead ${lead.id} (institute ${instituteId})`);
+          }
+        } catch (err) {
+          console.error(`[Sequences] Step 1 failed for lead ${lead.id}:`, err);
+        }
+      }
+
+      // ── Step 2 candidates ────────────────────────────────────────────────
+      // Leads where:
+      //   - step 1 was already sent
+      //   - step2_delay_hours have passed since step 1 was sent
+      //   - student still hasn't replied (last_activity_at hasn't changed since step 1)
+      //   - step 2 has NOT been executed yet
+      const step2Leads = await pool.query(`
+        SELECT l.id, l.student_phone, l.student_name, l.message, l.institute_id,
+               se1.sent_at AS step1_sent_at
+        FROM leads l
+        JOIN sequence_executions se1 ON se1.lead_id = l.id AND se1.step = 1
+        WHERE l.institute_id = $1
+          AND l.status = 'new'
+          AND se1.sent_at < NOW() - ($2 || ' hours')::interval
+          AND l.last_activity_at <= se1.sent_at + INTERVAL '5 minutes'
+          AND NOT EXISTS (
+            SELECT 1 FROM sequence_executions se2
+            WHERE se2.lead_id = l.id AND se2.step = 2
+          )
+      `, [instituteId, seq.step2_delay_hours]);
+
+      for (const lead of step2Leads.rows) {
+        try {
+          const msg = await buildFollowUpMessage(lead, seq.step2_message as string | null, 2);
+          const delivered = await sendMessageToStudent(
+            String(instituteId),
+            `${lead.student_phone as string}@c.us`,
+            msg,
+          );
+
+          if (delivered) {
+            await recordExecution(lead.id as number, instituteId, 2, msg);
+            await pool.query(
+              `UPDATE leads SET last_activity_at = NOW() WHERE id = $1`,
+              [lead.id],
+            );
+            sent++;
+            console.log(`[Sequences] Step 2 sent → lead ${lead.id} (institute ${instituteId})`);
+          }
+        } catch (err) {
+          console.error(`[Sequences] Step 2 failed for lead ${lead.id}:`, err);
+        }
+      }
+    }
+
+    console.log(`[Sequences] ✅ Done — ${sent} follow-up(s) sent this run`);
+  } catch (err) {
+    console.error('[Scheduler] runFollowUpSequences error:', err);
+  }
+}
+
+// ── Build message (custom or AI-generated) ────────────────────────────────────
+
+async function buildFollowUpMessage(
+  lead: { id: number; student_phone: string; student_name: string | null; message: string; institute_id: number },
+  customMessage: string | null,
+  step: number,
+): Promise<string> {
+  // Use custom message if institute configured one
+  if (customMessage && customMessage.trim() !== '' && customMessage !== 'opted_out') {
+    const name = lead.student_name ?? 'there';
+    return customMessage
+      .replace(/\{name\}/gi, name)
+      .replace(/\{student_name\}/gi, name);
+  }
+
+  // Otherwise generate via AI — reuse getAIReply with a follow-up prompt context
+  const prompt = step === 1
+    ? `[AUTO FOLLOW-UP STEP 1] Student hasn't responded since their initial inquiry. Send a warm, brief follow-up.`
+    : `[AUTO FOLLOW-UP STEP 2] This is a second follow-up. Student still hasn't responded. Be friendly but acknowledge they may be busy. Keep it very brief.`;
+
+  try {
+    const aiMsg = await getAIReply(lead.institute_id, lead.student_phone, prompt);
+    if (aiMsg && aiMsg.trim()) return aiMsg;
+  } catch { /* fall through to default */ }
+
+  // Fallback
+  const name = lead.student_name ? `, ${lead.student_name}` : '';
+  return step === 1
+    ? `Hi${name}! Just checking if you're still interested in learning more about our courses. We'd love to help. 😊`
+    : `Hi${name}! We noticed you hadn't responded yet. No worries — whenever you're ready, we're here to answer your questions!`;
+}
+
+// ── Record execution ──────────────────────────────────────────────────────────
+
+async function recordExecution(
+  leadId: number,
+  instituteId: number,
+  step: number,
+  message: string,
+): Promise<void> {
+  await pool.query(
+    `INSERT INTO sequence_executions (lead_id, institute_id, step, message_sent)
+     VALUES ($1, $2, $3, $4)
+     ON CONFLICT (lead_id, step) DO NOTHING`,
+    [leadId, instituteId, step, message],
+  );
+  // Save to messages table for conversation history
+  const lead = await pool.query(`SELECT student_phone FROM leads WHERE id = $1`, [leadId]);
+  if (lead.rows[0]) {
+    const sessionId = `wa-${instituteId}-${lead.rows[0].student_phone as string}`;
+    await pool.query(
+      `INSERT INTO messages (session_id, role, content) VALUES ($1, 'assistant', $2)`,
+      [sessionId, message],
+    );
+  }
+}
 
 // ── Subscription Expiry Check ─────────────────────────────────────────────────
 // Runs every day at midnight IST
@@ -32,9 +209,9 @@ async function checkSubscriptionExpiry(): Promise<void> {
           [row.institute_id],
         );
 
-        // Set institute is_paid = false — blocks dashboard access
+        // Set institute is_paid = false AND is_premium_accessible = false
         await pool.query(
-          `UPDATE institutes SET is_paid = FALSE WHERE id = $1`,
+          `UPDATE institutes SET is_paid = FALSE, is_premium_accessible = FALSE WHERE id = $1`,
           [row.institute_id],
         );
 
@@ -198,6 +375,9 @@ async function sendWeeklySummaries(): Promise<void> {
 export function startScheduler(): void {
   // Midnight daily — subscription expiry check
   cron.schedule('0 0 * * *', () => { void checkSubscriptionExpiry(); }, { timezone: 'Asia/Kolkata' });
+
+  // Every hour — auto follow-up sequences (Growth+ plan feature)
+  cron.schedule('0 * * * *', () => { void runFollowUpSequences(); }, { timezone: 'Asia/Kolkata' });
 
   // 9:00 AM daily — follow-ups due today
   cron.schedule('0 9 * * *', () => { void checkFollowUpsDue(); }, { timezone: 'Asia/Kolkata' });

@@ -41,10 +41,13 @@ export async function initDB(): Promise<void> {
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT`);
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_waba_id TEXT`);
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_connected BOOLEAN NOT NULL DEFAULT FALSE`);
-  // is_paid: true = payment active (or Starter on trial), false = payment pending/expired
+  // is_paid: true = payment confirmed, false = pending/expired
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS is_paid BOOLEAN NOT NULL DEFAULT TRUE`);
-  // Backfill: existing institutes without a subscription row are treated as paid (grandfathered)
-  // New Growth/Pro registrations will be inserted with is_paid = false
+  // is_premium_accessible: true ONLY for Growth/Pro with active paid subscription
+  // Starter plan is NEVER true here — Analytics, Chat Widget, AI Training are Growth/Pro only
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS is_premium_accessible BOOLEAN NOT NULL DEFAULT FALSE`);
+  // Backfill: existing paid Growth/Pro institutes get premium access
+  await pool.query(`UPDATE institutes SET is_premium_accessible = TRUE WHERE plan IN ('growth','pro') AND is_paid = TRUE AND is_active = TRUE`);
 
   // ── Migrate old plan slugs to new slugs ────────────────────────────────────
   // 'free'     → 'starter'  (old free-trial plan maps to starter)
@@ -344,6 +347,61 @@ export async function initDB(): Promise<void> {
     )
   `);
   console.log('  ✅ subscriptions table ready');
+
+  // ── 14. ai_response_usage ─────────────────────────────────────────────────
+  // Tracks monthly AI response count per institute for plan limit enforcement
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS ai_response_usage (
+      id             SERIAL PRIMARY KEY,
+      institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      year_month     TEXT    NOT NULL,          -- e.g. '2025-05'
+      response_count INTEGER NOT NULL DEFAULT 0,
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(institute_id, year_month)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_ai_usage_institute_month
+      ON ai_response_usage (institute_id, year_month)
+  `);
+  console.log('  ✅ ai_response_usage table ready');
+
+  // ── 15. follow_up_sequences ───────────────────────────────────────────────
+  // Institute-level config: defines the automatic follow-up schedule
+  // Each institute can have one active sequence with up to 2 steps
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS follow_up_sequences (
+      id             SERIAL PRIMARY KEY,
+      institute_id   INTEGER NOT NULL UNIQUE REFERENCES institutes(id) ON DELETE CASCADE,
+      is_enabled     BOOLEAN NOT NULL DEFAULT FALSE,
+      step1_delay_hours INTEGER NOT NULL DEFAULT 24,   -- hours after last_activity_at
+      step1_message  TEXT,                              -- null = AI generates it
+      step2_delay_hours INTEGER NOT NULL DEFAULT 72,   -- hours after step1 sent
+      step2_message  TEXT,                              -- null = AI generates it
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('  ✅ follow_up_sequences table ready');
+
+  // ── 16. sequence_executions ───────────────────────────────────────────────
+  // Per-lead tracking: which steps have been sent, when
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sequence_executions (
+      id             SERIAL PRIMARY KEY,
+      lead_id        INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      step           INTEGER NOT NULL CHECK (step IN (1, 2)),
+      sent_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      message_sent   TEXT NOT NULL,
+      UNIQUE(lead_id, step)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_sequence_executions_lead
+      ON sequence_executions (lead_id)
+  `);
+  console.log('  ✅ sequence_executions table ready');
 
   console.log('✅ initDB() complete — all tables ready.');
 }

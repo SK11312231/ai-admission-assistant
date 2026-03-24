@@ -17,6 +17,7 @@ interface InstituteRow {
   website: string | null;
   plan: string;
   is_paid: boolean;
+  is_premium_accessible: boolean;
   password_hash: string;
   created_at: string;
   whatsapp_connected: boolean;
@@ -66,7 +67,7 @@ router.post('/register', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'WhatsApp number is required.' });
     return;
   }
-  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
     res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
     return;
   }
@@ -96,12 +97,14 @@ router.post('/register', async (req: Request, res: Response) => {
     `);
 
     const passwordHash = hashPassword(password);
-    // Starter plan gets trial (is_paid = true), Growth/Pro require payment (is_paid = false)
+    // Starter gets trial (is_paid = true), Growth/Pro require payment (is_paid = false)
+    // is_premium_accessible is ALWAYS false on registration — set to true only after Growth/Pro payment
     const isPaid = plan === 'starter';
+    const isPremiumAccessible = false; // never true at registration
 
     const result = await pool.query(
-      `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash, is_paid)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING id, created_at`,
+      `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash, is_paid, is_premium_accessible)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at`,
       [
         name.trim(),
         email.trim().toLowerCase(),
@@ -111,6 +114,7 @@ router.post('/register', async (req: Request, res: Response) => {
         plan,
         passwordHash,
         isPaid,
+        isPremiumAccessible,
       ]
     );
 
@@ -136,6 +140,7 @@ router.post('/register', async (req: Request, res: Response) => {
       website: websiteClean,
       plan,
       is_paid: isPaid,
+      is_premium_accessible: isPremiumAccessible,
       whatsapp_connected: false,
       created_at: result.rows[0].created_at as string,
     });
@@ -219,6 +224,7 @@ router.post('/login', async (req: Request, res: Response) => {
           website: institute.website ?? null,
           plan: institute.plan,
           is_paid: false,
+          is_premium_accessible: false,
           whatsapp_connected: false,
           created_at: institute.created_at,
         },
@@ -235,6 +241,7 @@ router.post('/login', async (req: Request, res: Response) => {
       website: institute.website ?? null,
       plan: institute.plan,
       is_paid: true,
+      is_premium_accessible: institute.is_premium_accessible ?? false,
       whatsapp_connected: institute.whatsapp_connected ?? false,
       created_at: institute.created_at,
     });
@@ -338,7 +345,7 @@ router.patch('/:id/plan', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
 
-  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
     res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
     return;
   }

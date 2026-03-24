@@ -44,6 +44,7 @@ interface Institute {
   website: string | null;
   plan: string;
   is_paid: boolean;
+  is_premium_accessible: boolean;
   whatsapp_connected: boolean;
   whatsapp_waba_id?: string | null;
   whatsapp_phone_number_id?: string | null;
@@ -140,7 +141,6 @@ function formatFollowUp(date: string | null): string {
 export default function Dashboard() {
   const navigate = useNavigate();
   const [institute, setInstitute] = useState<Institute | null>(null);
-  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState<{
     complete: boolean; score: number; missing: string[]; present: string[];
   } | null>(null);
@@ -263,12 +263,17 @@ export default function Dashboard() {
         setLeads(await res.json() as Lead[]);
       } catch { /* silent */ }
 
-      // Fetch active subscription — determines if Growth/Pro features are unlocked
+      // Fetch active subscription status and update is_premium_accessible if needed
       try {
         const subRes = await fetch(apiUrl(`/api/payment/subscription/${inst.id}`));
         if (subRes.ok) {
           const sub = await subRes.json() as { status: string } | null;
-          setHasActiveSubscription(sub?.status === 'active');
+          // If subscription is active and institute is growth/pro, ensure is_premium_accessible is set
+          if (sub?.status === 'active' && ['growth', 'pro'].includes(inst.plan) && !inst.is_premium_accessible) {
+            const updated = { ...inst, is_premium_accessible: true };
+            localStorage.setItem('institute', JSON.stringify(updated));
+            setInstitute(updated);
+          }
         }
       } catch { /* silent */ }
 
@@ -556,11 +561,11 @@ export default function Dashboard() {
             };
             if (!verifyRes.ok) throw new Error(verifyData.error ?? 'Verification failed.');
 
-            // Update local institute state with is_paid = true
-            const updated = { ...institute, plan: verifyData.plan, is_paid: true };
+            // Update local institute state
+            const isPremiumPlan = ['growth', 'pro'].includes(verifyData.plan);
+            const updated = { ...institute, plan: verifyData.plan, is_paid: true, is_premium_accessible: isPremiumPlan };
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
-            setHasActiveSubscription(true); // payment confirmed
             setUpgradeSuccess(true);
             setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 4000);
           } catch (err) {
@@ -607,14 +612,14 @@ export default function Dashboard() {
   if (!institute) return null;
 
   const isStarter = institute.plan === 'starter';
-  // isPaid: directly from DB via institute.is_paid (set by payment verification, cleared by scheduler on expiry)
-  // hasActiveSubscription from API is a secondary check used for display only
-  const isPaid = institute.is_paid ?? hasActiveSubscription;
-  // Trial only applies to Starter plan — Growth/Pro require payment
+  // isPaid: Growth/Pro with confirmed payment only (Starter uses trial)
+  const isPaid = isStarter ? false : (institute.is_paid ?? false);
+  // premiumUnlocked: ONLY true when is_premium_accessible = true (Growth/Pro paid)
+  // Starter NEVER gets premium features regardless of trial status
+  const premiumUnlocked = institute.is_premium_accessible === true;
+  // Trial: Starter only — controls access to basic dashboard features
   const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
   const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : false;
-  // Premium features: paid OR starter still in trial
-  const premiumUnlocked = isPaid || (isStarter && !trialExpired);
   const trialPercent = isStarter && institute.created_at
     ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
     : 0;
@@ -897,12 +902,12 @@ export default function Dashboard() {
                   display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px',
                   borderRadius: '7px', width: '100%', border: 'none', cursor: 'pointer',
                   marginBottom: '1px', textAlign: 'left',
-                  background: isActive ? '#1f1c30' : 'transparent',
+                  background: isActive ? '#1f1c30' : locked ? 'transparent' : 'transparent',
                 }}>
-                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: locked ? '#3a3858' : isActive ? '#c9a55e' : '#8a6020', flexShrink: 0, display: 'inline-block' }} />
-                <span style={{ fontSize: '12px', color: locked ? '#4a4768' : isActive ? '#d4b896' : '#c9a55e', flex: 1 }}>{item.label}</span>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: locked ? '#534ab7' : isActive ? '#c9a55e' : '#8a6020', flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ fontSize: '12px', color: locked ? '#7f77dd' : isActive ? '#d4b896' : '#c9a55e', flex: 1 }}>{item.label}</span>
                 {locked
-                  ? <span style={{ fontSize: '9px', background: '#1e1c2e', color: '#4a4870', padding: '2px 6px', borderRadius: '20px' }}>🔒</span>
+                  ? <span style={{ fontSize: '8px', background: '#1a1830', border: '1px solid #2d2a50', color: '#7f77dd', padding: '2px 5px', borderRadius: '20px', fontWeight: 600 }}>Upgrade</span>
                   : <span style={{ fontSize: '9px', background: '#231c10', border: '1px solid #3a2e10', color: '#8a6020', padding: '2px 5px', borderRadius: '20px' }}>★ Adv</span>
                 }
               </button>
@@ -1296,13 +1301,13 @@ export default function Dashboard() {
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📊</div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Analytics is an Advanced Feature</h3>
+              <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Growth Plan Feature</span>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Unlock Advanced Analytics</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to unlock
-                lead trends, peak hour insights, conversion tracking, and more.
+                See exactly where your leads are coming from, when students are most active, and how your conversions are trending — all in one place.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
-                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll unlock</p>
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
                 {[
                   'Leads over time chart (7d / 30d)',
                   'Peak inquiry hours analysis',
@@ -1319,9 +1324,9 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Growth — ₹3,999/month →
+                ⬆️ Upgrade to Growth — ₹3,999/month →
               </button>
-              <p className="text-xs text-gray-400 mt-3">Annual plan available at ₹39,990/year — save 2 months</p>
+              <p className="text-xs text-gray-400 mt-3">Annual plan at ₹39,990/year — save 2 months</p>
             </div>
           ) : analyticsLoading ? (
             <div className="text-center py-20">
@@ -1587,10 +1592,10 @@ export default function Dashboard() {
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">💬</div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is a Growth Feature</h3>
+              <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Growth Plan Feature</span>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Add a Chat Widget to Your Website</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to embed
-                an AI-powered chat widget directly on your institute's website.
+                Let students ask questions directly on your website — AI replies instantly using your institute's information, 24/7.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
                 <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
@@ -1610,8 +1615,9 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Growth — ₹3,999/month →
+                ⬆️ Upgrade to Growth — ₹3,999/month →
               </button>
+              <p className="text-xs text-gray-400 mt-3">Annual plan at ₹39,990/year — save 2 months</p>
             </div>
           ) : (
             <>
@@ -1800,7 +1806,39 @@ export default function Dashboard() {
 
       {/* ── Training Tab ──────────────────────────────────────────────────────── */}
       {activeTab === 'training' && institute && (
-        <TrainingSection instituteId={institute.id} />
+        !premiumUnlocked ? (
+          <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">🧠</div>
+            <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Growth Plan Feature</span>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Train Your AI on Your Own Conversations</h3>
+            <p className="text-gray-500 text-sm max-w-sm mb-6">
+              Upload your past WhatsApp chats and the AI learns your institute's tone, FAQs, and style — giving students more accurate, personalised replies.
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
+              {[
+                'Upload WhatsApp chat exports (.txt)',
+                'AI learns from real student conversations',
+                'Custom tone & language style (Hindi/Hinglish)',
+                'Improves reply quality over time',
+                'Review & approve training examples',
+              ].map(f => (
+                <div key={f} className="flex items-center gap-2 mb-2">
+                  <span className="text-indigo-500 font-bold text-xs">✓</span>
+                  <span className="text-sm text-gray-700">{f}</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+              className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
+              ⬆️ Upgrade to Growth — ₹3,999/month →
+            </button>
+            <p className="text-xs text-gray-400 mt-3">Annual plan at ₹39,990/year — save 2 months</p>
+          </div>
+        ) : (
+          <TrainingSection instituteId={institute.id} />
+        )
       )}
 
       {/* ── Premium Tab ───────────────────────────────────────────────────────── */}
