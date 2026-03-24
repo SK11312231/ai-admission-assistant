@@ -6,6 +6,57 @@ import {
   sendWeeklySummaryEmail,
 } from './routes/emailService';
 
+// ── Subscription Expiry Check ─────────────────────────────────────────────────
+// Runs every day at midnight IST
+// Sets is_paid = FALSE for institutes whose subscription has expired
+
+async function checkSubscriptionExpiry(): Promise<void> {
+  console.log('[Scheduler] Checking subscription expiry...');
+  try {
+    // Find active subscriptions that have passed their expiry date
+    const result = await pool.query(`
+      SELECT s.institute_id, i.name, i.email, s.plan, s.billing_cycle, s.expires_at
+      FROM subscriptions s
+      JOIN institutes i ON i.id = s.institute_id
+      WHERE s.status = 'active'
+        AND s.expires_at < NOW()
+        AND i.is_paid = TRUE
+    `);
+
+    for (const row of result.rows) {
+      try {
+        // Mark subscription as expired
+        await pool.query(
+          `UPDATE subscriptions SET status = 'expired', updated_at = NOW()
+           WHERE institute_id = $1 AND status = 'active'`,
+          [row.institute_id],
+        );
+
+        // Set institute is_paid = false — blocks dashboard access
+        await pool.query(
+          `UPDATE institutes SET is_paid = FALSE WHERE id = $1`,
+          [row.institute_id],
+        );
+
+        console.log(`[Scheduler] Subscription expired: institute ${row.institute_id} (${row.name}) — plan ${row.plan}`);
+
+        // TODO: Send subscription expired email to institute
+        // void sendSubscriptionExpiredEmail({ toEmail: row.email, instituteName: row.name, plan: row.plan });
+      } catch (err) {
+        console.error(`[Scheduler] Expiry update failed for institute ${row.institute_id}:`, err);
+      }
+    }
+
+    if (result.rows.length > 0) {
+      console.log(`[Scheduler] ✅ Expired ${result.rows.length} subscription(s)`);
+    } else {
+      console.log('[Scheduler] No subscriptions to expire today.');
+    }
+  } catch (err) {
+    console.error('[Scheduler] checkSubscriptionExpiry error:', err);
+  }
+}
+
 // ── Follow-up Due Today ───────────────────────────────────────────────────────
 // Runs every day at 9:00 AM
 
@@ -145,6 +196,9 @@ async function sendWeeklySummaries(): Promise<void> {
 // ── Start all cron jobs ───────────────────────────────────────────────────────
 
 export function startScheduler(): void {
+  // Midnight daily — subscription expiry check
+  cron.schedule('0 0 * * *', () => { void checkSubscriptionExpiry(); }, { timezone: 'Asia/Kolkata' });
+
   // 9:00 AM daily — follow-ups due today
   cron.schedule('0 9 * * *', () => { void checkFollowUpsDue(); }, { timezone: 'Asia/Kolkata' });
 

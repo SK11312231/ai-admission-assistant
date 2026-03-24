@@ -74,9 +74,9 @@ export default function Register() {
       if (!res.ok) throw new Error(data.error ?? 'Registration failed.');
 
       localStorage.setItem('institute', JSON.stringify(data));
-      // Growth/Pro: go to dashboard with ?upgrade= flag to auto-open payment modal
+      // Growth/Pro: go to complete-payment page for Razorpay checkout
       if (form.plan === 'growth' || form.plan === 'pro') {
-        navigate(`/dashboard?upgrade=${form.plan}`);
+        navigate('/complete-payment');
       } else {
         navigate('/dashboard');
       }
