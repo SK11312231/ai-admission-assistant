@@ -44,6 +44,7 @@ interface Institute {
   website: string | null;
   plan: string;
   is_paid: boolean;
+  is_premium_accessible: boolean;
   whatsapp_connected: boolean;
   whatsapp_waba_id?: string | null;
   whatsapp_phone_number_id?: string | null;
@@ -556,8 +557,9 @@ export default function Dashboard() {
             };
             if (!verifyRes.ok) throw new Error(verifyData.error ?? 'Verification failed.');
 
-            // Update local institute state with is_paid = true
-            const updated = { ...institute, plan: verifyData.plan, is_paid: true };
+            // Update local institute state
+            const isPremiumPlan = ['growth', 'pro'].includes(verifyData.plan);
+            const updated = { ...institute, plan: verifyData.plan, is_paid: true, is_premium_accessible: isPremiumPlan };
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
             setHasActiveSubscription(true); // payment confirmed
@@ -607,14 +609,14 @@ export default function Dashboard() {
   if (!institute) return null;
 
   const isStarter = institute.plan === 'starter';
-  // isPaid: only Growth/Pro with confirmed payment are considered "paid"
-  // Starter uses trial window (trialExpired) — is_paid is always false for limit purposes
-  const isPaid = isStarter ? false : (institute.is_paid ?? hasActiveSubscription);
-  // Trial only applies to Starter — Growth/Pro require actual payment
+  // isPaid: Growth/Pro with confirmed payment only (Starter uses trial)
+  const isPaid = isStarter ? false : (institute.is_paid ?? false);
+  // premiumUnlocked: ONLY true when is_premium_accessible = true (Growth/Pro paid)
+  // Starter NEVER gets premium features regardless of trial status
+  const premiumUnlocked = institute.is_premium_accessible === true;
+  // Trial: Starter only — controls access to basic dashboard features
   const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
   const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : false;
-  // Premium unlocked: paid Growth/Pro OR Starter within 14-day trial
-  const premiumUnlocked = isPaid || (isStarter && !trialExpired);
   const trialPercent = isStarter && institute.created_at
     ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
     : 0;
