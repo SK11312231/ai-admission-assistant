@@ -41,6 +41,10 @@ export async function initDB(): Promise<void> {
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT`);
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_waba_id TEXT`);
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_connected BOOLEAN NOT NULL DEFAULT FALSE`);
+  // is_paid: true = payment active (or Starter on trial), false = payment pending/expired
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS is_paid BOOLEAN NOT NULL DEFAULT TRUE`);
+  // Backfill: existing institutes without a subscription row are treated as paid (grandfathered)
+  // New Growth/Pro registrations will be inserted with is_paid = false
 
   // ── Migrate old plan slugs to new slugs ────────────────────────────────────
   // 'free'     → 'starter'  (old free-trial plan maps to starter)

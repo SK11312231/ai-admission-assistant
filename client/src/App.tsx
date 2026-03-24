@@ -7,6 +7,7 @@ import Dashboard from './pages/Dashboard';
 import Chat from './pages/Chat';
 import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
+import CompletePayment from './pages/CompletePayment';
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/register" element={<Register />} />
             <Route path="/login" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />
+            <Route path="/complete-payment" element={<CompletePayment />} />
             <Route path="/chat" element={<Chat />} />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />

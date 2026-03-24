@@ -22,7 +22,17 @@ export default function Login() {
         body: JSON.stringify({ email, password }),
       });
 
-      const data = (await res.json()) as { id?: number; error?: string };
+      const data = (await res.json()) as {
+        id?: number; error?: string; message?: string;
+        institute?: object;
+      };
+
+      if (res.status === 402 && data.error === 'payment_pending') {
+        // Institute registered but hasn't paid yet — redirect to payment page
+        localStorage.setItem('institute', JSON.stringify(data.institute));
+        navigate('/complete-payment');
+        return;
+      }
 
       if (!res.ok) {
         throw new Error(data.error ?? 'Login failed.');
