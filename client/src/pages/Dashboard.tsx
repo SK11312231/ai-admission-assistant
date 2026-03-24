@@ -141,7 +141,6 @@ function formatFollowUp(date: string | null): string {
 export default function Dashboard() {
   const navigate = useNavigate();
   const [institute, setInstitute] = useState<Institute | null>(null);
-  const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState<{
     complete: boolean; score: number; missing: string[]; present: string[];
   } | null>(null);
@@ -264,12 +263,17 @@ export default function Dashboard() {
         setLeads(await res.json() as Lead[]);
       } catch { /* silent */ }
 
-      // Fetch active subscription — determines if Growth/Pro features are unlocked
+      // Fetch active subscription status and update is_premium_accessible if needed
       try {
         const subRes = await fetch(apiUrl(`/api/payment/subscription/${inst.id}`));
         if (subRes.ok) {
           const sub = await subRes.json() as { status: string } | null;
-          setHasActiveSubscription(sub?.status === 'active');
+          // If subscription is active and institute is growth/pro, ensure is_premium_accessible is set
+          if (sub?.status === 'active' && ['growth', 'pro'].includes(inst.plan) && !inst.is_premium_accessible) {
+            const updated = { ...inst, is_premium_accessible: true };
+            localStorage.setItem('institute', JSON.stringify(updated));
+            setInstitute(updated);
+          }
         }
       } catch { /* silent */ }
 
@@ -562,7 +566,6 @@ export default function Dashboard() {
             const updated = { ...institute, plan: verifyData.plan, is_paid: true, is_premium_accessible: isPremiumPlan };
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
-            setHasActiveSubscription(true); // payment confirmed
             setUpgradeSuccess(true);
             setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 4000);
           } catch (err) {
