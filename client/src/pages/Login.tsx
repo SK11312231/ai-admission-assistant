@@ -24,7 +24,7 @@ export default function Login() {
 
       const data = (await res.json()) as {
         id?: number; error?: string; message?: string;
-        institute?: object;
+        institute?: Record<string, unknown>;
       };
 
       if (res.status === 402 && data.error === 'payment_pending') {

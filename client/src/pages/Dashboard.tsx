@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
@@ -139,7 +139,6 @@ function formatFollowUp(date: string | null): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
-  const location = useLocation();
   const [institute, setInstitute] = useState<Institute | null>(null);
   const [hasActiveSubscription, setHasActiveSubscription] = useState(false);
   const [profileCompleteness, setProfileCompleteness] = useState<{

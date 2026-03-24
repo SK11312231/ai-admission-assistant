@@ -13,8 +13,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../db';
-import { sendPaymentConfirmationEmail, sendPaymentAdminNotificationEmail } from './emailService';
-import { sendWelcomeEmail } from './emailService';
+import { sendPaymentConfirmationEmail, sendPaymentAdminNotificationEmail, sendWelcomeEmail } from './emailService';
 
 const router = Router();
 
