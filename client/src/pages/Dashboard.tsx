@@ -897,12 +897,12 @@ export default function Dashboard() {
                   display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px',
                   borderRadius: '7px', width: '100%', border: 'none', cursor: 'pointer',
                   marginBottom: '1px', textAlign: 'left',
-                  background: isActive ? '#1f1c30' : 'transparent',
+                  background: isActive ? '#1f1c30' : locked ? 'transparent' : 'transparent',
                 }}>
-                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: locked ? '#3a3858' : isActive ? '#c9a55e' : '#8a6020', flexShrink: 0, display: 'inline-block' }} />
-                <span style={{ fontSize: '12px', color: locked ? '#4a4768' : isActive ? '#d4b896' : '#c9a55e', flex: 1 }}>{item.label}</span>
+                <span style={{ width: '5px', height: '5px', borderRadius: '50%', background: locked ? '#534ab7' : isActive ? '#c9a55e' : '#8a6020', flexShrink: 0, display: 'inline-block' }} />
+                <span style={{ fontSize: '12px', color: locked ? '#7f77dd' : isActive ? '#d4b896' : '#c9a55e', flex: 1 }}>{item.label}</span>
                 {locked
-                  ? <span style={{ fontSize: '9px', background: '#1e1c2e', color: '#4a4870', padding: '2px 6px', borderRadius: '20px' }}>🔒</span>
+                  ? <span style={{ fontSize: '8px', background: '#1a1830', border: '1px solid #2d2a50', color: '#7f77dd', padding: '2px 5px', borderRadius: '20px', fontWeight: 600 }}>Upgrade</span>
                   : <span style={{ fontSize: '9px', background: '#231c10', border: '1px solid #3a2e10', color: '#8a6020', padding: '2px 5px', borderRadius: '20px' }}>★ Adv</span>
                 }
               </button>
@@ -1296,13 +1296,13 @@ export default function Dashboard() {
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📊</div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Analytics is an Advanced Feature</h3>
+              <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Growth Plan Feature</span>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Unlock Advanced Analytics</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to unlock
-                lead trends, peak hour insights, conversion tracking, and more.
+                See exactly where your leads are coming from, when students are most active, and how your conversions are trending — all in one place.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
-                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll unlock</p>
+                <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
                 {[
                   'Leads over time chart (7d / 30d)',
                   'Peak inquiry hours analysis',
@@ -1319,9 +1319,9 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Growth — ₹3,999/month →
+                ⬆️ Upgrade to Growth — ₹3,999/month →
               </button>
-              <p className="text-xs text-gray-400 mt-3">Annual plan available at ₹39,990/year — save 2 months</p>
+              <p className="text-xs text-gray-400 mt-3">Annual plan at ₹39,990/year — save 2 months</p>
             </div>
           ) : analyticsLoading ? (
             <div className="text-center py-20">
@@ -1587,10 +1587,10 @@ export default function Dashboard() {
             /* ── Upgrade gate ── */
             <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
               <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">💬</div>
-              <h3 className="text-xl font-bold text-gray-900 mb-2">Chat Widget is a Growth Feature</h3>
+              <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Growth Plan Feature</span>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Add a Chat Widget to Your Website</h3>
               <p className="text-gray-500 text-sm max-w-sm mb-6">
-                Upgrade to the <span className="font-semibold text-indigo-600">Growth plan</span> to embed
-                an AI-powered chat widget directly on your institute's website.
+                Let students ask questions directly on your website — AI replies instantly using your institute's information, 24/7.
               </p>
               <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
                 <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
@@ -1610,8 +1610,9 @@ export default function Dashboard() {
               <button
                 onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
                 className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
-                Upgrade to Growth — ₹3,999/month →
+                ⬆️ Upgrade to Growth — ₹3,999/month →
               </button>
+              <p className="text-xs text-gray-400 mt-3">Annual plan at ₹39,990/year — save 2 months</p>
             </div>
           ) : (
             <>
@@ -1800,7 +1801,39 @@ export default function Dashboard() {
 
       {/* ── Training Tab ──────────────────────────────────────────────────────── */}
       {activeTab === 'training' && institute && (
-        <TrainingSection instituteId={institute.id} />
+        !premiumUnlocked ? (
+          <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">🧠</div>
+            <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Growth Plan Feature</span>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Train Your AI on Your Own Conversations</h3>
+            <p className="text-gray-500 text-sm max-w-sm mb-6">
+              Upload your past WhatsApp chats and the AI learns your institute's tone, FAQs, and style — giving students more accurate, personalised replies.
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you'll get</p>
+              {[
+                'Upload WhatsApp chat exports (.txt)',
+                'AI learns from real student conversations',
+                'Custom tone & language style (Hindi/Hinglish)',
+                'Improves reply quality over time',
+                'Review & approve training examples',
+              ].map(f => (
+                <div key={f} className="flex items-center gap-2 mb-2">
+                  <span className="text-indigo-500 font-bold text-xs">✓</span>
+                  <span className="text-sm text-gray-700">{f}</span>
+                </div>
+              ))}
+            </div>
+            <button
+              onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+              className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
+              ⬆️ Upgrade to Growth — ₹3,999/month →
+            </button>
+            <p className="text-xs text-gray-400 mt-3">Annual plan at ₹39,990/year — save 2 months</p>
+          </div>
+        ) : (
+          <TrainingSection instituteId={institute.id} />
+        )
       )}
 
       {/* ── Premium Tab ───────────────────────────────────────────────────────── */}
