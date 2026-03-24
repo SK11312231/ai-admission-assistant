@@ -363,6 +363,43 @@ export async function initDB(): Promise<void> {
   `);
   console.log('  ✅ ai_response_usage table ready');
 
+  // ── 15. follow_up_sequences ───────────────────────────────────────────────
+  // Institute-level config: defines the automatic follow-up schedule
+  // Each institute can have one active sequence with up to 2 steps
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS follow_up_sequences (
+      id             SERIAL PRIMARY KEY,
+      institute_id   INTEGER NOT NULL UNIQUE REFERENCES institutes(id) ON DELETE CASCADE,
+      is_enabled     BOOLEAN NOT NULL DEFAULT FALSE,
+      step1_delay_hours INTEGER NOT NULL DEFAULT 24,   -- hours after last_activity_at
+      step1_message  TEXT,                              -- null = AI generates it
+      step2_delay_hours INTEGER NOT NULL DEFAULT 72,   -- hours after step1 sent
+      step2_message  TEXT,                              -- null = AI generates it
+      created_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      updated_at     TIMESTAMPTZ NOT NULL DEFAULT NOW()
+    )
+  `);
+  console.log('  ✅ follow_up_sequences table ready');
+
+  // ── 16. sequence_executions ───────────────────────────────────────────────
+  // Per-lead tracking: which steps have been sent, when
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS sequence_executions (
+      id             SERIAL PRIMARY KEY,
+      lead_id        INTEGER NOT NULL REFERENCES leads(id) ON DELETE CASCADE,
+      institute_id   INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      step           INTEGER NOT NULL CHECK (step IN (1, 2)),
+      sent_at        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      message_sent   TEXT NOT NULL,
+      UNIQUE(lead_id, step)
+    )
+  `);
+  await pool.query(`
+    CREATE INDEX IF NOT EXISTS idx_sequence_executions_lead
+      ON sequence_executions (lead_id)
+  `);
+  console.log('  ✅ sequence_executions table ready');
+
   console.log('✅ initDB() complete — all tables ready.');
 }
 

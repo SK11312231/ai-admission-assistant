@@ -39,7 +39,7 @@ const LIMITS: Record<string, PlanLimits> = {
     whatsapp_numbers:      2,
     analytics:          true,
     ai_training:        true,
-    follow_up_sequences: false, // Phase 2
+    follow_up_sequences: true,  // ✅ Growth feature — now implemented
     bulk_broadcast:    false,   // Phase 3
     multi_branch:      false,   // Phase 3
   },
