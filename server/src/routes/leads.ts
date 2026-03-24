@@ -3,6 +3,7 @@ import OpenAI from 'openai';
 import pool from '../db';
 import { addToBlocklist } from './blocklist';
 import { sendMessageToStudent } from './whatsappManager';
+import { checkActiveleadsLimit, getInstitutePlan, getLimits, getAIUsageThisMonth } from './planLimits';
 
 const router = Router();
 
@@ -107,6 +108,35 @@ router.get('/:instituteId', async (req: Request, res: Response) => {
   }
 });
 
+// ── GET /api/leads/:instituteId/usage ────────────────────────────────────────
+// Returns current month AI response usage + active leads count vs plan limits
+// Used by Dashboard to show usage bars
+
+router.get('/:instituteId/usage', async (req: Request, res: Response) => {
+  const id = Number(req.params.instituteId);
+  try {
+    const plan = await getInstitutePlan(id);
+    const limits = getLimits(plan);
+    const aiUsage = await getAIUsageThisMonth(id);
+
+    const leadsResult = await pool.query(
+      `SELECT COUNT(*) AS count FROM leads WHERE institute_id = $1 AND status NOT IN ('lost', 'converted')`,
+      [id],
+    );
+    const activeLeads = Number(leadsResult.rows[0]?.count ?? 0);
+
+    res.json({
+      plan,
+      ai_responses:     { used: aiUsage.used,  limit: aiUsage.limit },
+      active_leads:     { used: activeLeads,    limit: limits.active_leads },
+      whatsapp_numbers: { limit: limits.whatsapp_numbers },
+    });
+  } catch (err) {
+    console.error('Usage fetch error:', err);
+    res.status(500).json({ error: 'Failed to fetch usage.' });
+  }
+});
+
 // ── POST /api/leads — manually add a lead from dashboard ────────────────────
 
 router.post('/', async (req: Request, res: Response) => {
@@ -131,6 +161,20 @@ router.post('/', async (req: Request, res: Response) => {
 
   try {
     await ensureLeadColumns();
+
+    // ── Active leads limit check ────────────────────────────────────────────
+    const plan = await getInstitutePlan(institute_id);
+    const limitCheck = await checkActiveleadsLimit(institute_id, plan);
+    if (!limitCheck.allowed) {
+      res.status(429).json({
+        error: `Active leads limit reached (${limitCheck.used}/${limitCheck.limit}). Convert or archive existing leads, or upgrade your plan.`,
+        code: 'LEADS_LIMIT_REACHED',
+        used: limitCheck.used,
+        limit: limitCheck.limit,
+      });
+      return;
+    }
+
     const result = await pool.query(
       `INSERT INTO leads
          (institute_id, student_name, student_phone, message, status, notes, follow_up_date, last_activity_at)
@@ -380,12 +424,20 @@ export async function createLeadFromWhatsApp(
     );
 
     if (existing.rows.length > 0) {
-      // Lead exists — just update last_activity_at
+      // Lead exists — just update last_activity_at (doesn't count toward limit)
       await pool.query(
         `UPDATE leads SET last_activity_at = NOW(), message = $1 WHERE id = $2`,
         [message, existing.rows[0].id],
       );
       return;
+    }
+
+    // New lead — check active leads limit before inserting
+    const plan = await getInstitutePlan(instituteId);
+    const limitCheck = await checkActiveleadsLimit(instituteId, plan);
+    if (!limitCheck.allowed) {
+      console.log(`[Leads] Institute ${instituteId} hit active leads cap (${limitCheck.used}/${limitCheck.limit}) — lead not saved for ${studentPhone}`);
+      return; // Silently skip — AI will still reply, just won't save as lead
     }
 
     // New lead — try to extract name from first message

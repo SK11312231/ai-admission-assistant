@@ -5,6 +5,7 @@ import { isNumberBlocked } from './blocklist';
 import { getInstituteDetails, scrapeAndEnrich as scrapeAndEnrichFn } from './instituteEnrichment';
 import { sendNewLeadEmail } from './emailService';
 import { getPersonalityProfile, getRelevantExamples } from './chatTraining';
+import { checkAndIncrementAIResponse, checkWhatsAppSessionLimit, getInstitutePlan } from './planLimits';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -289,6 +290,15 @@ export async function getAIReply(
 ): Promise<string | null> {
   console.log(`[WA] getAIReply START — institute ${instituteId}`);
   try {
+    // ── Plan limit check ──────────────────────────────────────────────────────
+    const plan = await getInstitutePlan(instituteId);
+    const limitCheck = await checkAndIncrementAIResponse(instituteId, plan);
+    if (!limitCheck.allowed) {
+      console.log(`[WA] AI response limit reached for institute ${instituteId} (${limitCheck.used}/${limitCheck.limit})`);
+      // Return a polite limit message instead of null so student gets a response
+      return `Thank you for your message! Our team has reached the monthly inquiry limit. Please contact us directly or visit our website for more information.`;
+    }
+
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
     const historyResult = await pool.query(
@@ -396,6 +406,19 @@ export async function initSession(instituteId: string): Promise<void> {
   const existing = sessions.get(instituteId);
   if (existing?.status === 'connected') return;
   if (existing?.status === 'initializing' || existing?.status === 'qr') return;
+
+  // ── WhatsApp session limit check ──────────────────────────────────────────
+  const plan = await getInstitutePlan(Number(instituteId));
+  // Count how many OTHER sessions this institute already has connected
+  const connectedCount = [...sessions.entries()].filter(
+    ([id, s]) => id !== instituteId && s.status === 'connected' && id.startsWith(`${instituteId}-`)
+  ).length + (sessions.get(instituteId)?.status === 'connected' ? 1 : 0);
+
+  const sessionCheck = await checkWhatsAppSessionLimit(Number(instituteId), plan, connectedCount);
+  if (!sessionCheck.allowed) {
+    console.warn(`[WA] Institute ${instituteId} WhatsApp session limit reached (${connectedCount}/${sessionCheck.limit})`);
+    throw new Error(`WhatsApp connection limit reached for your plan. Upgrade to connect more numbers.`);
+  }
 
   initLocks.add(instituteId);
 
