@@ -607,13 +607,13 @@ export default function Dashboard() {
   if (!institute) return null;
 
   const isStarter = institute.plan === 'starter';
-  // isPaid: directly from DB via institute.is_paid (set by payment verification, cleared by scheduler on expiry)
-  // hasActiveSubscription from API is a secondary check used for display only
-  const isPaid = institute.is_paid ?? hasActiveSubscription;
-  // Trial only applies to Starter plan — Growth/Pro require payment
+  // isPaid: only Growth/Pro with confirmed payment are considered "paid"
+  // Starter uses trial window (trialExpired) — is_paid is always false for limit purposes
+  const isPaid = isStarter ? false : (institute.is_paid ?? hasActiveSubscription);
+  // Trial only applies to Starter — Growth/Pro require actual payment
   const trialLeft = isStarter && institute.created_at ? getTrialDaysLeft(institute.created_at) : 0;
   const trialExpired = isStarter && institute.created_at ? isTrialExpired(institute.created_at) : false;
-  // Premium features: paid OR starter still in trial
+  // Premium unlocked: paid Growth/Pro OR Starter within 14-day trial
   const premiumUnlocked = isPaid || (isStarter && !trialExpired);
   const trialPercent = isStarter && institute.created_at
     ? Math.min(100, Math.round(((14 - trialLeft) / 14) * 100))
