@@ -209,9 +209,9 @@ async function checkSubscriptionExpiry(): Promise<void> {
           [row.institute_id],
         );
 
-        // Set institute is_paid = false — blocks dashboard access
+        // Set institute is_paid = false AND is_premium_accessible = false
         await pool.query(
-          `UPDATE institutes SET is_paid = FALSE WHERE id = $1`,
+          `UPDATE institutes SET is_paid = FALSE, is_premium_accessible = FALSE WHERE id = $1`,
           [row.institute_id],
         );
 

@@ -41,10 +41,13 @@ export async function initDB(): Promise<void> {
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_access_token TEXT`);
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_waba_id TEXT`);
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS whatsapp_connected BOOLEAN NOT NULL DEFAULT FALSE`);
-  // is_paid: true = payment active (or Starter on trial), false = payment pending/expired
+  // is_paid: true = payment confirmed, false = pending/expired
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS is_paid BOOLEAN NOT NULL DEFAULT TRUE`);
-  // Backfill: existing institutes without a subscription row are treated as paid (grandfathered)
-  // New Growth/Pro registrations will be inserted with is_paid = false
+  // is_premium_accessible: true ONLY for Growth/Pro with active paid subscription
+  // Starter plan is NEVER true here — Analytics, Chat Widget, AI Training are Growth/Pro only
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS is_premium_accessible BOOLEAN NOT NULL DEFAULT FALSE`);
+  // Backfill: existing paid Growth/Pro institutes get premium access
+  await pool.query(`UPDATE institutes SET is_premium_accessible = TRUE WHERE plan IN ('growth','pro') AND is_paid = TRUE AND is_active = TRUE`);
 
   // ── Migrate old plan slugs to new slugs ────────────────────────────────────
   // 'free'     → 'starter'  (old free-trial plan maps to starter)
