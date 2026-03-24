@@ -20,6 +20,7 @@ import adminRouter, { plansRouter } from './routes/admin';
 import embeddedSignupRouter from './routes/embeddedSignup';
 import trainingRouter from './routes/chatTraining';  // ← AI Training feature
 import paymentRouter from './routes/payment';         // ← Razorpay payment
+import sequencesRouter from './routes/followUpSequences'; // ← Follow-up sequences
 
 const app = express();
 app.set('trust proxy', 1);
@@ -98,6 +99,7 @@ app.use('/api/widget', widgetRouter);
 app.use('/api/admin', defaultLimiter, adminRouter);
 app.use('/api/plans', defaultLimiter, plansRouter);      // ← public plans endpoint
 app.use('/api/payment', defaultLimiter, paymentRouter);  // ← Razorpay payments
+app.use('/api/sequences', defaultLimiter, sequencesRouter); // ← Follow-up sequences
 app.use('/api/webhook', webhookRouter);
 
 // Health check
