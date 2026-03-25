@@ -67,8 +67,8 @@ router.post('/register', async (req: Request, res: Response) => {
     res.status(400).json({ error: 'WhatsApp number is required.' });
     return;
   }
-  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
+  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be one of: starter, growth, pro.' });
     return;
   }
   if (!password || typeof password !== 'string' || password.length < 6) {
@@ -345,8 +345,8 @@ router.patch('/:id/plan', async (req: Request, res: Response) => {
   const { id } = req.params;
   const { plan } = req.body as { plan?: string };
 
-  if (!plan || !['free', 'advanced', 'pro'].includes(plan)) {
-    res.status(400).json({ error: 'Plan must be one of: free, advanced, pro.' });
+  if (!plan || !['starter', 'growth', 'pro'].includes(plan)) {
+    res.status(400).json({ error: 'Plan must be one of: starter, growth, pro.' });
     return;
   }
 
