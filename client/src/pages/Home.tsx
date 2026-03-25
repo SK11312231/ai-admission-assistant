@@ -107,6 +107,11 @@ const FALLBACK_PLANS: Plan[] = [
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Home() {
   const [plans, setPlans] = useState<Plan[]>(FALLBACK_PLANS);
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [schedForm, setSchedForm] = useState({ name: '', institute: '', size: '', mobile: '', pilot: true });
+  const [schedError, setSchedError] = useState('');
+  const [schedSuccess, setSchedSuccess] = useState(false);
+  const [schedLoading, setSchedLoading] = useState(false);
 
   useEffect(() => {
     fetch(apiUrl('/api/plans'))
@@ -114,6 +119,27 @@ export default function Home() {
       .then((data: Plan[]) => { if (Array.isArray(data) && data.length) setPlans(data); })
       .catch(() => { /* silently use fallback */ });
   }, []);
+
+  const handleScheduleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setSchedError('');
+    const digits = schedForm.mobile.replace(/\s/g, '');
+    if (!schedForm.name.trim()) { setSchedError('Please enter your name.'); return; }
+    if (!schedForm.institute.trim()) { setSchedError('Please enter your institute name.'); return; }
+    if (!schedForm.size) { setSchedError('Please select institute size.'); return; }
+    if (!/^[6-9]\d{9}$/.test(digits)) { setSchedError('Please enter a valid 10-digit Indian mobile number.'); return; }
+
+    setSchedLoading(true);
+    try {
+      await fetch(apiUrl('/api/institutes/demo-request'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...schedForm, mobile: digits }),
+      });
+      setSchedSuccess(true);
+    } catch { /* non-fatal */ }
+    finally { setSchedLoading(false); }
+  };
 
   return (
     <div className="flex flex-col">
@@ -290,10 +316,108 @@ export default function Home() {
               </div>
             ))}
           </div>
+
+          {/* Schedule a Call CTA */}
+          <div className="mt-12 text-center">
+            <p className="text-gray-500 text-sm mb-4">Not sure which plan is right for you?</p>
+            <button
+              onClick={() => { setShowSchedule(true); setSchedSuccess(false); setSchedError(''); setSchedForm({ name: '', institute: '', size: '', mobile: '', pilot: true }); }}
+              className="inline-flex items-center gap-2 bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold px-8 py-3.5 rounded-xl hover:from-indigo-700 hover:to-violet-700 transition-all shadow-lg hover:shadow-indigo-200 text-sm">
+              📞 Schedule a Free Call — We'll Set It Up For You
+            </button>
+            <p className="text-xs text-gray-400 mt-3">We'll call within 2 hours · Takes just 15 minutes</p>
+          </div>
         </div>
       </section>
 
-      {/* CTA */}
+      {/* ── Schedule a Call Modal ─────────────────────────────────────────────── */}
+      {showSchedule && (
+        <div className="fixed inset-0 bg-black/60 z-50 flex items-center justify-center p-4" onClick={e => { if (e.target === e.currentTarget) setShowSchedule(false); }}>
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            {/* Modal header */}
+            <div className="bg-gradient-to-r from-indigo-600 to-violet-600 px-6 py-5 flex items-start justify-between">
+              <div>
+                <h3 className="text-white font-bold text-xl">📞 Schedule a Free Call</h3>
+                <p className="text-indigo-100 text-sm mt-1">We'll set up InquiAI for your institute live on the call — takes just 15 minutes.</p>
+              </div>
+              <button onClick={() => setShowSchedule(false)} className="text-white/70 hover:text-white text-xl leading-none ml-4 mt-0.5 flex-shrink-0 w-8 h-8 flex items-center justify-center rounded-full hover:bg-white/10 transition-colors">✕</button>
+            </div>
+
+            <div className="p-6">
+              {schedSuccess ? (
+                <div className="py-8 text-center">
+                  <div className="w-16 h-16 bg-green-50 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✅</div>
+                  <h4 className="font-bold text-gray-900 text-lg mb-2">Details Received!</h4>
+                  <p className="text-gray-500 text-sm">We'll call you within 2 hours on <strong>{schedForm.mobile}</strong> to set everything up.</p>
+                  <button onClick={() => setShowSchedule(false)} className="mt-6 bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 transition-colors">Close</button>
+                </div>
+              ) : (
+                <form onSubmit={(e) => void handleScheduleSubmit(e)} className="space-y-4">
+                  {schedError && (
+                    <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3">⚠ {schedError}</div>
+                  )}
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Your Name <span className="text-red-500">*</span></label>
+                    <input type="text" value={schedForm.name}
+                      onChange={e => { setSchedForm(f => ({ ...f, name: e.target.value })); setSchedError(''); }}
+                      placeholder="e.g. Rajesh Sharma"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Institute Name <span className="text-red-500">*</span></label>
+                    <input type="text" value={schedForm.institute}
+                      onChange={e => { setSchedForm(f => ({ ...f, institute: e.target.value })); setSchedError(''); }}
+                      placeholder="e.g. ABC Coaching Center"
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Approx. Number of Students <span className="text-red-500">*</span></label>
+                    <select value={schedForm.size}
+                      onChange={e => { setSchedForm(f => ({ ...f, size: e.target.value })); setSchedError(''); }}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                      <option value="">Select institute size</option>
+                      <option value="1–50 students">1–50 students</option>
+                      <option value="51–200 students">51–200 students</option>
+                      <option value="201–500 students">201–500 students</option>
+                      <option value="500+ students">500+ students</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">Mobile Number <span className="text-red-500">*</span></label>
+                    <input type="tel" value={schedForm.mobile}
+                      onChange={e => { setSchedForm(f => ({ ...f, mobile: e.target.value })); setSchedError(''); }}
+                      placeholder="e.g. 9876543210"
+                      maxLength={10}
+                      className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input type="checkbox" checked={schedForm.pilot}
+                      onChange={e => setSchedForm(f => ({ ...f, pilot: e.target.checked }))}
+                      className="mt-0.5 w-4 h-4 text-indigo-600 rounded border-gray-300 focus:ring-indigo-500" />
+                    <span className="text-sm text-gray-600">Yes, I'm interested in a <strong>free pilot trial</strong> for my institute</span>
+                  </label>
+
+                  <button type="submit" disabled={schedLoading}
+                    className="w-full bg-gradient-to-r from-indigo-600 to-violet-600 text-white font-semibold py-3 rounded-xl hover:from-indigo-700 hover:to-violet-700 disabled:opacity-50 transition-all text-sm mt-2">
+                    {schedLoading ? (
+                      <span className="flex items-center justify-center gap-2">
+                        <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        Sending…
+                      </span>
+                    ) : '📲 Send My Details →'}
+                  </button>
+                  <p className="text-center text-xs text-gray-400">We'll reach out within 2 hours on WhatsApp</p>
+                </form>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       <section className="py-16 px-4 bg-indigo-50">
         <div className="max-w-2xl mx-auto text-center">
           <h2 className="text-2xl font-bold text-gray-900 mb-4">Ready to Stop Missing Leads?</h2>
