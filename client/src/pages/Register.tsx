@@ -13,6 +13,12 @@ interface Plan {
 
 export default function Register() {
   const navigate = useNavigate();
+  useEffect(() => {
+    const stored = localStorage.getItem('institute');
+    if (stored) {
+      navigate('/dashboard');
+    }
+  }, [navigate]);
   const location = useLocation();
   const [plans, setPlans] = useState<Plan[]>([]);
 
