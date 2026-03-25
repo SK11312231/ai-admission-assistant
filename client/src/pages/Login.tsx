@@ -1,10 +1,16 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import Logo from '../components/Logo';
 import { useNavigate, Link } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 
 export default function Login() {
   const navigate = useNavigate();
+  useEffect(() => {
+    const stored = localStorage.getItem('institute');
+    if (stored) {
+      navigate('/dashboard');
+    }
+  }, [navigate]);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
