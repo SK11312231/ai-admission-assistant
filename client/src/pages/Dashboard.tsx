@@ -647,11 +647,23 @@ export default function Dashboard() {
 
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f8f7ff' }}>
+      {/* Media query styles for mobile/desktop breakpoints */}
+      <style>{`
+        @media (min-width: 1024px) {
+          .mobile-only { display: none !important; }
+          .sidebar-drawer { position: relative !important; transform: none !important; height: 100vh; }
+          .dashboard-main { padding: 20px 24px !important; }
+        }
+        @media (max-width: 1023px) {
+          .desktop-only { display: none !important; }
+          .sidebar-drawer { position: fixed !important; top: 0; bottom: 0; left: 0; z-index: 50; height: 100vh; }
+        }
+      `}</style>
 
       {/* ─── Mobile sidebar overlay backdrop ─────────────────────────────────── */}
       {sidebarOpen && (
         <div
-          className="fixed inset-0 bg-black/60 z-40 lg:hidden"
+          className="mobile-only fixed inset-0 bg-black/60 z-40"
           onClick={() => setSidebarOpen(false)}
         />
       )}
@@ -747,8 +759,8 @@ export default function Dashboard() {
 
       {/* ── Payment / Upgrade Modal ──────────────────────────────────────────── */}
       {showUpgradeModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-6">
+        <div className="fixed inset-0 bg-black/50 flex items-start sm:items-center justify-center z-50 p-3 sm:p-4 overflow-y-auto">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg p-5 my-4" style={{ maxHeight: 'calc(100vh - 32px)', overflowY: 'auto' }}>
             {/* Header */}
             <div className="flex items-center justify-between mb-5">
               <div>
@@ -785,8 +797,7 @@ export default function Dashboard() {
                   </button>
                 </div>
 
-                <div className="grid sm:grid-cols-2 gap-4">
-                  {/* Growth */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <div className={`rounded-xl border-2 p-4 flex flex-col ${institute.plan === 'growth' && isPaid ? 'border-indigo-400 bg-indigo-50' : 'border-gray-200 hover:border-indigo-200 transition-colors'}`}>
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs font-bold text-indigo-600 uppercase tracking-widest">Growth</span>
@@ -858,7 +869,7 @@ export default function Dashboard() {
 
       {/* ─────────────────────── SIDEBAR ─────────────────────────────────────── */}
       <aside
-        className={`fixed lg:relative inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        className={`sidebar-drawer transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full'}`}
         style={{
           width: '220px', flexShrink: 0, background: '#13111e',
           display: 'flex', flexDirection: 'column', overflow: 'hidden',
@@ -872,7 +883,7 @@ export default function Dashboard() {
               <div style={{ fontSize: '15px', fontWeight: 500, color: '#fff' }}>InquiAI</div>
               <div style={{ fontSize: '10px', color: '#55526e', marginTop: '1px' }}>Admission Assistant</div>
             </div>
-            <button className="lg:hidden" onClick={() => setSidebarOpen(false)}
+            <button className="mobile-only" onClick={() => setSidebarOpen(false)}
               style={{ background: 'none', border: 'none', color: '#6a677e', fontSize: '20px', cursor: 'pointer', padding: '0', lineHeight: 1 }}>✕</button>
           </div>
         </div>
@@ -989,10 +1000,9 @@ export default function Dashboard() {
 
         {/* Topbar */}
         <header style={{ background: '#fff', borderBottom: '0.5px solid #e5e7eb', padding: '11px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-																											
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             {/* Hamburger — mobile only */}
-            <button className="lg:hidden" onClick={() => setSidebarOpen(true)}
+            <button className="mobile-only" onClick={() => setSidebarOpen(true)}
               style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px 4px 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
               <span style={{ width: '18px', height: '2px', background: '#374151', borderRadius: '2px', display: 'block' }} />
               <span style={{ width: '18px', height: '2px', background: '#374151', borderRadius: '2px', display: 'block' }} />
@@ -1010,16 +1020,16 @@ export default function Dashboard() {
             {institute.whatsapp_connected ? (
               <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '4px 8px' }}>
                 <span style={{ width: '6px', height: '6px', background: '#22c55e', borderRadius: '50%', display: 'inline-block', flexShrink: 0 }} />
-                <span className="hidden sm:inline" style={{ fontSize: '11px', color: '#15803d' }}>WA active · {institute.whatsapp_number}</span>
-                <span className="sm:hidden" style={{ fontSize: '11px', color: '#15803d' }}>WA ✓</span>
+                <span className="desktop-only" style={{ fontSize: "11px", color: "#15803d" }}>WA active · {institute.whatsapp_number}</span>
+                <span className="mobile-only" style={{ fontSize: '11px', color: '#15803d' }}>WA ✓</span>
                 <button onClick={() => void handleDisconnect()}
-                  className="hidden sm:inline"
+                  className="desktop-only"
                   style={{ marginLeft: '4px', fontSize: '10px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>✕</button>
               </div>
             ) : (
               <button onClick={() => void handleConnectWhatsApp()}
                 style={{ fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap' }}>
-                🔗 <span className="hidden sm:inline">Connect </span>WhatsApp
+                🔗 <span className="desktop-only">Connect </span>WhatsApp
               </button>
             )}
             <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#eeedfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 500, color: '#534ab7', flexShrink: 0 }}>
@@ -1029,7 +1039,7 @@ export default function Dashboard() {
         </header>
 
         {/* Scrollable content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '16px' }} className="sm:p-6 pb-20 lg:pb-6">
+        <main style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 80px' }} className="dashboard-main">
 
           {/* ── Profile Completeness Banner ───────────────────────────────── */}
           {profileCompleteness && !profileCompleteness.complete && (
@@ -1888,12 +1898,13 @@ export default function Dashboard() {
         </main>
 
         {/* ── Mobile Bottom Tab Bar ─────────────────────────────────────────── */}
-        {/* Visible only on mobile (lg:hidden), provides quick nav to core tabs */}
-        <nav className="lg:hidden" style={{
+        <nav style={{
           position: 'fixed', bottom: 0, left: 0, right: 0,
           background: '#13111e', borderTop: '1px solid #1e1c2e',
           display: 'flex', alignItems: 'stretch', zIndex: 40, height: '60px',
-        }}>
+        }}
+          className="mobile-only"
+        >
           {[
             { id: 'leads' as Tab, label: 'Leads', icon: '📋' },
             { id: 'whatsapp' as Tab, label: 'WhatsApp', icon: '📱' },
