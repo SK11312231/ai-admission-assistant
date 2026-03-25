@@ -985,33 +985,24 @@
     const btn = document.getElementById('submitBtn');
     btn.textContent = 'Sending…'; btn.style.opacity = '0.7'; btn.disabled = true;
 
-    // Send to backend for email notification
     try {
-      await fetch('/api/demo-request', {
+      await fetch('/api/institutes/demo-request', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name, institute, size, mobile, pilot }),
       });
-    } catch(e) { /* non-fatal */ }
+    } catch(e) { /* non-fatal — email is best effort */ }
 
-    // Open WhatsApp with pre-filled message
-    // ⚠️ REPLACE the number below with YOUR WhatsApp number (country code + number, no +)
-    const YOUR_WHATSAPP = '918360859476';
-    const msg = encodeURIComponent(
-      `📋 *New Demo Request — InquiAI*\n\n` +
-      `👤 *Name:* ${name}\n` +
-      `🏫 *Institute:* ${institute}\n` +
-      `👥 *Size:* ${size}\n` +
-      `📱 *Mobile:* ${mobile}\n` +
-      `🎯 *Pilot Trial:* ${pilot ? 'Yes, interested ✅' : 'Not sure yet'}`
-    );
-    window.open(`https://wa.me/${YOUR_WHATSAPP}?text=${msg}`, '_blank');
-
-    btn.textContent = '✅ Sent! Opening WhatsApp…'; btn.style.opacity = '1';
+    // Success — no WhatsApp redirect, email sent to Saurabh
+    btn.textContent = "✅ Done! We'll call you within 2 hours.";
+    btn.style.background = '#059669';
+    btn.style.opacity = '1';
     setTimeout(() => {
       closeModal();
-      btn.textContent = '📲 Send My Details →'; btn.disabled = false;
-    }, 2500);
+      btn.textContent = '📲 Send My Details →';
+      btn.style.background = '';
+      btn.disabled = false;
+    }, 3000);
   }
 </script>
 
@@ -1021,4 +1012,9 @@
   <p>AI-powered admission assistant for coaching institutes & education businesses</p>
   <p style="margin-top:10px;">
     <a href="https://inquiai.in">inquiai.in</a> &nbsp;·&nbsp;
-    <a href="https://
+    <a href="https://www.facebook.com/inquiai" target="_blank">Facebook</a> &nbsp;·&nbsp;
+    <a href="https://www.linkedin.com/company/inquiai" target="_blank">LinkedIn</a> &nbsp;·&nbsp;
+    <a href="https://www.instagram.com/inquiai" target="_blank">Instagram</a>
+  </p>
+  <p style="margin-top:12px;font-size:11px;color:#4b5563;">© 2024 InquiAI. All rights reserved.</p>
+</footer>
