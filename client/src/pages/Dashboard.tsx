@@ -1126,7 +1126,7 @@ export default function Dashboard() {
                         <p className="text-sm text-gray-600 mb-1 truncate">{lead.message || <span className="italic text-gray-400">No message</span>}</p>
                         <div className="flex items-center gap-4 text-xs text-gray-400">
                           <span>📱 {lead.student_phone}</span>
-                          <span>🕐 {new Date(lead.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                          <span>🕐 {new Date(lead.last_activity_at || lead.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
                         </div>
                         {lead.notes && !isExpanded && (
                           <p className="text-xs text-gray-400 mt-1 italic truncate">📝 {lead.notes}</p>
