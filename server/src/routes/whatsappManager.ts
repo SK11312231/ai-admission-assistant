@@ -7,6 +7,7 @@ import { sendNewLeadEmail } from './emailService';
 import { getPersonalityProfile, getRelevantExamples } from './chatTraining';
 import { checkAndIncrementAIResponse, checkWhatsAppSessionLimit, getInstitutePlan } from './planLimits';
 
+
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export type WAStatus = 'initializing' | 'qr' | 'connected' | 'disconnected';
@@ -50,7 +51,7 @@ function getOpenAI(): OpenAI {
 // ── Save lead ────────────────────────────────────────────────────────────────
 
 const SPAM_PATTERNS = [
-  /@lid$/,
+
   /@newsletter$/,
   /paymentredirect/i,
   /policybazaar/i,
@@ -189,8 +190,8 @@ async function buildSystemPrompt(
         personality.languageStyle === 'hinglish'
           ? '\nLANGUAGE: This counselor writes in Hinglish (Hindi + English mix). Match this naturally.'
           : personality.languageStyle === 'hindi'
-          ? '\nLANGUAGE: This counselor writes in Hindi. Reply in Hindi.'
-          : '';
+            ? '\nLANGUAGE: This counselor writes in Hindi. Reply in Hindi.'
+            : '';
       personalitySection =
         `\n\n---\n\nCOUNSELOR STYLE (learned from real conversations — follow this):\n\n` +
         `${personality.profile}${langNote}`;
@@ -298,6 +299,14 @@ export async function getAIReply(
       // Return a polite limit message instead of null so student gets a response
       return `Thank you for your message! Our team has reached the monthly inquiry limit. Please contact us directly or visit our website for more information.`;
     }
+
+
+
+
+
+
+
+
 
     const sessionId = `wa-${instituteId}-${studentPhone}`;
 
@@ -420,6 +429,19 @@ export async function initSession(instituteId: string): Promise<void> {
     throw new Error(`WhatsApp connection limit reached for your plan. Upgrade to connect more numbers.`);
   }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
   initLocks.add(instituteId);
 
   console.log(`[WA] Initializing session for institute ${instituteId}`);
@@ -483,18 +505,23 @@ export async function initSession(instituteId: string): Promise<void> {
 
   client.on('message', async (msg: Message) => {
     if (msg.fromMe) return;
-    if (msg.from.endsWith('@g.us')) return;
-    if (msg.from.endsWith('@newsletter')) return;
-    if (msg.from.endsWith('@lid')) return;
-    if (msg.from === 'status@broadcast') return;
+    if (msg.from.endsWith('@g.us')) return;        // group messages
+    if (msg.from.endsWith('@newsletter')) return;   // broadcast newsletters
+
+    if (msg.from === 'status@broadcast') return;    // status updates
     if (!msg.body || msg.body.trim() === '') return;
 
-    const phoneClean = msg.from.replace('@c.us', '').replace(/[\s\-\+]/g, '');
+    // @lid is WhatsApp's Linked ID format — treat same as @c.us (real users)
+    // Normalize both formats to a clean phone number
+    const phoneClean = msg.from
+      .replace('@c.us', '')
+      .replace('@lid', '')
+      .replace(/[\s\-\+]/g, '');
     if (await isNumberBlocked(Number(instituteId), phoneClean)) {
       console.log(`[WA] Blocked: ${phoneClean}`); return;
     }
 
-    const studentPhone = msg.from.replace('@c.us', '');
+    const studentPhone = msg.from.replace('@c.us', '').replace('@lid', '');
     const messageText = msg.body;
 
     console.log(`[WA] ===== INCOMING =====`);
@@ -577,7 +604,7 @@ export async function restoreAllSessions(): Promise<void> {
       void initSession(String(id)).catch(err => {
         console.error(`[WA] Session restore failed for institute ${id}:`, err);
       });
-    } 
+    }
   }
   catch (err) {
     console.error('[WA] restoreAllSessions failed:', err);
