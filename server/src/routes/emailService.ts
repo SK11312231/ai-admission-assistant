@@ -581,3 +581,81 @@ export async function sendPaymentAdminNotificationEmail(opts: {
 
   console.log(`[Email] Payment admin notification sent for: ${instituteName}`);
 }
+
+// ── 11. Invoice Email (to institute after payment) ────────────────────────────
+
+export async function sendInvoiceEmail(opts: {
+  toEmail: string;
+  instituteName: string;
+  plan: string;
+  billingCycle: string;
+  amount: string;
+  paymentId: string;
+  orderId: string;
+  expiresAt: string;
+  dashboardUrl?: string;
+}): Promise<void> {
+  const {
+    toEmail, instituteName, plan, billingCycle,
+    amount, paymentId, orderId, expiresAt,
+    dashboardUrl = process.env.CLIENT_URL ?? 'https://inquiai.in',
+  } = opts;
+
+  const invoiceDate = new Date().toLocaleDateString('en-IN', {
+    day: 'numeric', month: 'long', year: 'numeric',
+  });
+  const invoiceNumber = `INV-${Date.now().toString().slice(-8)}`;
+
+  const body = `
+    <h2 style="margin:0 0 4px;color:#111827;font-size:20px;">🧾 Invoice from InquiAI</h2>
+    <p style="color:#6b7280;margin:0 0 24px;font-size:13px;">Thank you for your payment. Please keep this for your records.</p>
+
+    ${infoBox(`
+      <table style="width:100%;border-collapse:collapse;font-size:13px;">
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Invoice Number</td>
+          <td style="padding:6px 0;color:#1f2937;font-weight:600;text-align:right;">${invoiceNumber}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Invoice Date</td>
+          <td style="padding:6px 0;color:#1f2937;text-align:right;">${invoiceDate}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Billed To</td>
+          <td style="padding:6px 0;color:#1f2937;text-align:right;">${instituteName}</td>
+        </tr>
+        <tr style="border-top:1px solid #e5e7eb;">
+          <td style="padding:12px 0 6px;color:#6b7280;">Description</td>
+          <td style="padding:12px 0 6px;color:#1f2937;text-align:right;">InquiAI ${plan} Plan — ${billingCycle}</td>
+        </tr>
+        <tr>
+          <td style="padding:6px 0;color:#6b7280;">Valid Until</td>
+          <td style="padding:6px 0;color:#1f2937;text-align:right;">${expiresAt}</td>
+        </tr>
+        <tr style="border-top:2px solid #e5e7eb;">
+          <td style="padding:12px 0 0;color:#111827;font-weight:700;font-size:15px;">Total Paid</td>
+          <td style="padding:12px 0 0;color:#059669;font-weight:800;font-size:18px;text-align:right;">${amount}</td>
+        </tr>
+      </table>
+    `, '#4f46e5')}
+
+    <div style="background:#f9fafb;border:1px solid #e5e7eb;border-radius:8px;padding:14px 18px;margin:20px 0;font-size:12px;color:#6b7280;">
+      <p style="margin:0 0 4px;"><strong style="color:#374151;">Payment ID:</strong> ${paymentId}</p>
+      <p style="margin:0;"><strong style="color:#374151;">Order ID:</strong> ${orderId}</p>
+    </div>
+
+    <p style="color:#6b7280;font-size:13px;margin-top:4px;">
+      For any billing queries, reply to this email or contact
+      <a href="mailto:support@inquiai.in" style="color:#4f46e5;">support@inquiai.in</a>
+    </p>
+    ${ctaButton('Go to Dashboard →', `${dashboardUrl}/dashboard`)}
+  `;
+
+  await sendEmail({
+    to: toEmail,
+    subject: `🧾 Invoice #${invoiceNumber} — InquiAI ${plan} Plan`,
+    html: baseTemplate('Invoice', body),
+  });
+
+  console.log(`[Email] Invoice sent to ${toEmail} (${invoiceNumber})`);
+}

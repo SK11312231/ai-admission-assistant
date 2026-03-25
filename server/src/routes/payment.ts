@@ -13,7 +13,7 @@
 import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import pool from '../db';
-import { sendPaymentConfirmationEmail, sendPaymentAdminNotificationEmail, sendWelcomeEmail } from './emailService';
+import { sendPaymentConfirmationEmail, sendPaymentAdminNotificationEmail, sendWelcomeEmail, sendInvoiceEmail } from './emailService';
 
 const router = Router();
 
@@ -256,6 +256,18 @@ router.post('/verify', async (req: Request, res: Response) => {
       toEmail: inst.email,
       instituteName: inst.name,
     }).catch(e => console.error('[Payment] Welcome email failed:', e));
+
+    // Send invoice email to institute
+    void sendInvoiceEmail({
+      toEmail:       inst.email,
+      instituteName: inst.name,
+      plan:          planLabel,
+      billingCycle:  cycleLabel,
+      amount:        amountFormatted,
+      paymentId:     razorpay_payment_id,
+      orderId:       razorpay_order_id,
+      expiresAt:     expiresAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }),
+    }).catch(e => console.error('[Payment] Invoice email failed:', e));
 
     // Send payment confirmation email to institute
     void sendPaymentConfirmationEmail({

@@ -72,7 +72,9 @@ function sortByStatus(leads: LeadRow[]): LeadRow[] {
     const ob = STATUS_ORDER[b.status] ?? 99;
     if (oa !== ob) return oa - ob;
     // Within same status: newest first
-    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+    const aTime = new Date(a.last_activity_at || a.created_at).getTime();
+    const bTime = new Date(b.last_activity_at || b.created_at).getTime();
+    return bTime - aTime;
   });
 }
 
