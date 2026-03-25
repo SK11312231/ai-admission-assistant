@@ -113,10 +113,8 @@ app.get('/health', defaultLimiter, async (_req, res) => {
   }
 });
 
-app.get('/demo', (_req, res) => {
-  res.sendFile(path.join(clientDist, 'demo.html'));
-});
-
+// /demo is now a React route (Demo.tsx) — handled by the catch-all below
+// /privacy-policy and /terms-of-service are still static HTML files
 app.get('/privacy-policy', (_req, res) => {
   res.sendFile(path.join(clientDist, 'privacy-policy.html'));
 });
