@@ -21,6 +21,7 @@ export default function Register() {
   }, [navigate]);
   const location = useLocation();
   const [plans, setPlans] = useState<Plan[]>([]);
+  const [errors, setErrors] = useState<Record<string, string>>({});
 
   // Read ?plan=xxx from URL — pre-selects the plan the user clicked on Home page
   const urlPlan = new URLSearchParams(location.search).get('plan') ?? 'starter';
@@ -48,11 +49,69 @@ export default function Register() {
         // Fallback static plans if API fails
         setPlans([
           { id: 1, slug: 'starter', name: 'Starter', price_monthly: 2499, badge: '14-Day Free Trial' },
-          { id: 2, slug: 'growth',  name: 'Growth',  price_monthly: 3999, badge: 'Most Popular' },
-          { id: 3, slug: 'pro',     name: 'Pro',     price_monthly: 8999, badge: 'Full Power' },
+          { id: 2, slug: 'growth', name: 'Growth', price_monthly: 3999, badge: 'Most Popular' },
+          { id: 3, slug: 'pro', name: 'Pro', price_monthly: 8999, badge: 'Full Power' },
         ]);
       });
   }, []);
+
+  const validate = () => {
+    const newErrors: Record<string, string> = {};
+
+    // Name
+    if (!form.name.trim()) {
+      newErrors.name = 'Institute name is required';
+    } else if (form.name.length < 3) {
+      newErrors.name = 'Minimum 3 characters required';
+    }
+
+    // Email
+    if (!form.email.trim()) {
+      newErrors.email = 'Email is required';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      newErrors.email = 'Invalid email format';
+    }
+
+    // Phone
+    if (!form.phone.trim()) {
+      newErrors.phone = 'Phone is required';
+    } else if (!/^[6-9]\d{9}$/.test(form.phone.replace(/\D/g, ''))) {
+      newErrors.phone = 'Enter valid 10-digit Indian number';
+    }
+
+    // WhatsApp
+    if (!form.whatsapp_number.trim()) {
+      newErrors.whatsapp_number = 'WhatsApp number is required';
+    } else if (!/^[6-9]\d{9}$/.test(form.whatsapp_number.replace(/\D/g, ''))) {
+      newErrors.whatsapp_number = 'Enter valid WhatsApp number';
+    }
+
+    // Website (optional)
+    if (form.website && !/^https?:\/\/.+\..+/.test(form.website)) {
+      newErrors.website = 'Enter valid URL (https://example.com)';
+    }
+
+    // Password
+    if (!form.password) {
+      newErrors.password = 'Password is required';
+    } else if (form.password.length < 6) {
+      newErrors.password = 'Minimum 6 characters required';
+    } else if (!/[A-Z]/.test(form.password)) {
+      newErrors.password = 'At least 1 uppercase letter required';
+    } else if (!/[0-9]/.test(form.password)) {
+      newErrors.password = 'At least 1 number required';
+    }
+
+    // Confirm Password
+    if (!form.confirmPassword) {
+      newErrors.confirmPassword = 'Please confirm password';
+    } else if (form.password !== form.confirmPassword) {
+      newErrors.confirmPassword = 'Passwords do not match';
+    }
+
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     setForm({ ...form, [e.target.name]: e.target.value });
@@ -62,10 +121,7 @@ export default function Register() {
     e.preventDefault();
     setError(null);
 
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
+    if (!validate()) return;
 
     setLoading(true);
     try {
@@ -128,105 +184,191 @@ export default function Register() {
           )}
 
           <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
+
+            {/* NAME */}
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Institute Name</label>
-              <input id="name" name="name" type="text" required
-                value={form.name} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="e.g. ABC Coaching Center" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Institute Name
+              </label>
+              <input
+                name="name"
+                value={form.name}
+                onChange={handleChange}
+                placeholder="e.g. ABC Coaching Center"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+        ${errors.name
+                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                    : 'border-gray-300 focus:ring-indigo-500'
+                  }`}
+              />
+              {errors.name && <p className="text-xs text-red-500 mt-1">{errors.name}</p>}
             </div>
 
+            {/* EMAIL */}
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Official Email</label>
-              <input id="email" name="email" type="email" required
-                value={form.email} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="contact@institute.com" />
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Official Email
+              </label>
+              <input
+                name="email"
+                type="email"
+                value={form.email}
+                onChange={handleChange}
+                placeholder="contact@institute.com"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+        ${errors.email
+                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                    : 'border-gray-300 focus:ring-indigo-500'
+                  }`}
+              />
+              {errors.email && <p className="text-xs text-red-500 mt-1">{errors.email}</p>}
             </div>
 
+            {/* PHONE + WHATSAPP */}
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input id="phone" name="phone" type="tel" required
-                  value={form.phone} onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="+91 9876543210" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+                <input
+                  name="phone"
+                  type="tel"
+                  value={form.phone}
+                  onChange={handleChange}
+                  placeholder="9876543210"
+                  className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+          ${errors.phone
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-gray-300 focus:ring-indigo-500'
+                    }`}
+                />
+                {errors.phone && <p className="text-xs text-red-500 mt-1">{errors.phone}</p>}
               </div>
+
               <div>
-                <label htmlFor="whatsapp_number" className="block text-sm font-medium text-gray-700 mb-1">WhatsApp</label>
-                <input id="whatsapp_number" name="whatsapp_number" type="tel" required
-                  value={form.whatsapp_number} onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                  placeholder="+91 9876543210" />
+                <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp</label>
+                <input
+                  name="whatsapp_number"
+                  type="tel"
+                  value={form.whatsapp_number}
+                  onChange={handleChange}
+                  placeholder="9876543210"
+                  className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+          ${errors.whatsapp_number
+                      ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                      : 'border-gray-300 focus:ring-indigo-500'
+                    }`}
+                />
+                {errors.whatsapp_number && (
+                  <p className="text-xs text-red-500 mt-1">{errors.whatsapp_number}</p>
+                )}
               </div>
             </div>
 
+            {/* WEBSITE */}
             <div>
-              <label htmlFor="website" className="block text-sm font-medium text-gray-700 mb-1">
-                Institute Website <span className="text-gray-400 font-normal">(optional)</span>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Institute Website <span className="text-gray-400">(optional)</span>
               </label>
-              <input id="website" name="website" type="url"
-                value={form.website} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="https://www.yourinstitute.com" />
-              <p className="text-xs text-gray-400 mt-1">We'll auto-generate your AI assistant's knowledge base from this.</p>
-            </div>
-
-            {/* Plan selector */}
-            <div>
-              <label htmlFor="plan" className="block text-sm font-medium text-gray-700 mb-1">
-                Choose Your Plan
-              </label>
-              <select id="plan" name="plan" value={form.plan} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent bg-white">
-                {plans.length === 0 ? (
-                  <option value="starter">Starter — ₹2,499/month</option>
-                ) : (
-                  plans.map(plan => (
-                    <option key={plan.slug} value={plan.slug}>
-                      {plan.name} — ₹{plan.price_monthly.toLocaleString('en-IN')}/month
-                      {plan.slug === 'growth' ? ' ⭐ Most Popular' : ''}
-                    </option>
-                  ))
-                )}
-              </select>
-              {selectedPlan && (
-                <p className="text-xs text-indigo-600 mt-1 font-medium">
-                  {form.plan === 'starter'
-                    ? '✓ 14-day free trial included — no credit card needed.'
-                    : `✓ Payment for ${selectedPlan.name} plan required after account creation.`}
+              <input
+                name="website"
+                value={form.website}
+                onChange={handleChange}
+                placeholder="https://www.yourinstitute.com"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+        ${errors.website
+                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                    : 'border-gray-300 focus:ring-indigo-500'
+                  }`}
+              />
+              {errors.website ? (
+                <p className="text-xs text-red-500 mt-1">{errors.website}</p>
+              ) : (
+                <p className="text-xs text-gray-400 mt-1">
+                  We'll auto-generate your AI assistant's knowledge base from this.
                 </p>
               )}
             </div>
 
+            {/* PLAN */}
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input id="password" name="password" type="password" required minLength={6}
-                value={form.password} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Min 6 characters" />
-            </div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Choose Your Plan
+              </label>
+              <select
+                name="plan"
+                value={form.plan}
+                onChange={handleChange}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+              >
+                {plans.map(plan => (
+                  <option key={plan.slug} value={plan.slug}>
+                    {plan.name} — ₹{plan.price_monthly.toLocaleString('en-IN')}/month
+                  </option>
+                ))}
+              </select>
 
-            <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
-              <input id="confirmPassword" name="confirmPassword" type="password" required minLength={6}
-                value={form.confirmPassword} onChange={handleChange}
-                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${form.confirmPassword && form.password !== form.confirmPassword ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
-                placeholder="Re-enter your password" />
-              {form.confirmPassword && form.password !== form.confirmPassword && (
-                <p className="text-xs text-red-500 mt-1">Passwords do not match.</p>
+              {selectedPlan && (
+                <p className="text-xs text-indigo-600 mt-1 font-medium">
+                  {form.plan === 'starter'
+                    ? '✓ 14-day free trial included'
+                    : `✓ Payment required for ${selectedPlan.name}`}
+                </p>
               )}
             </div>
 
-            <button type="submit" disabled={loading}
-              className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors text-sm mt-2">
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                  Registering…
-                </span>
-              ) : form.plan === 'starter' ? 'Start Free Trial →' : 'Create Account & Pay →'}
+            {/* PASSWORD */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">Password</label>
+              <input
+                name="password"
+                type="password"
+                value={form.password}
+                onChange={handleChange}
+                placeholder="Min 6 chars, 1 uppercase, 1 number"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+        ${errors.password
+                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                    : 'border-gray-300 focus:ring-indigo-500'
+                  }`}
+              />
+              {errors.password && (
+                <p className="text-xs text-red-500 mt-1">{errors.password}</p>
+              )}
+            </div>
+
+            {/* CONFIRM PASSWORD */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Confirm Password
+              </label>
+              <input
+                name="confirmPassword"
+                type="password"
+                value={form.confirmPassword}
+                onChange={handleChange}
+                placeholder="Re-enter password"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2
+        ${errors.confirmPassword
+                    ? 'border-red-400 bg-red-50 focus:ring-red-400'
+                    : 'border-gray-300 focus:ring-indigo-500'
+                  }`}
+              />
+              {errors.confirmPassword && (
+                <p className="text-xs text-red-500 mt-1">{errors.confirmPassword}</p>
+              )}
+            </div>
+
+            {/* SUBMIT */}
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm mt-2"
+            >
+              {loading ? 'Registering…' :
+                form.plan === 'starter'
+                  ? 'Start Free Trial →'
+                  : 'Create Account & Pay →'}
             </button>
+
           </form>
 
           <p className="text-center text-sm text-gray-500 mt-6">
