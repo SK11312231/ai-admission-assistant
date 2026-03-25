@@ -141,6 +141,7 @@ function formatFollowUp(date: string | null): string {
 export default function Dashboard() {
   const navigate = useNavigate();
   const [institute, setInstitute] = useState<Institute | null>(null);
+  const [sidebarOpen, setSidebarOpen] = useState(false); // mobile sidebar drawer
   const [profileCompleteness, setProfileCompleteness] = useState<{
     complete: boolean; score: number; missing: string[]; present: string[];
   } | null>(null);
@@ -647,6 +648,13 @@ export default function Dashboard() {
   return (
     <div style={{ display: 'flex', height: '100vh', overflow: 'hidden', background: '#f8f7ff' }}>
 
+      {/* ─── Mobile sidebar overlay backdrop ─────────────────────────────────── */}
+      {sidebarOpen && (
+        <div
+          className="fixed inset-0 bg-black/60 z-40 lg:hidden"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       {/* ─────────────────────── MODALS (unchanged) ──────────────────────────── */}
 
       {/* QR Modal */}
@@ -849,18 +857,23 @@ export default function Dashboard() {
       )}
 
       {/* ─────────────────────── SIDEBAR ─────────────────────────────────────── */}
-      <aside style={{
-        width: '220px', flexShrink: 0, background: '#13111e',
-        display: 'flex', flexDirection: 'column', overflow: 'hidden',
-      }}>
-        {/* Logo */}
+      <aside
+        className={`fixed lg:relative inset-y-0 left-0 z-50 transition-transform duration-300 ease-in-out ${sidebarOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}`}
+        style={{
+          width: '220px', flexShrink: 0, background: '#13111e',
+          display: 'flex', flexDirection: 'column', overflow: 'hidden',
+          height: '100vh',
+        }}>
+        {/* Logo + mobile close button */}
         <div style={{ padding: '20px 16px 20px', borderBottom: '1px solid #1e1c2e' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div style={{ width: '30px', height: '30px', background: '#7f77dd', borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '14px', color: '#fff' }}>⚡</div>
-            <div>
+            <div style={{ flex: 1 }}>
               <div style={{ fontSize: '15px', fontWeight: 500, color: '#fff' }}>InquiAI</div>
               <div style={{ fontSize: '10px', color: '#55526e', marginTop: '1px' }}>Admission Assistant</div>
             </div>
+            <button className="lg:hidden" onClick={() => setSidebarOpen(false)}
+              style={{ background: 'none', border: 'none', color: '#6a677e', fontSize: '20px', cursor: 'pointer', padding: '0', lineHeight: 1 }}>✕</button>
           </div>
         </div>
 
@@ -868,7 +881,7 @@ export default function Dashboard() {
         <div style={{ padding: '14px 10px 0' }}>
           <div style={{ fontSize: '9px', color: '#3e3c56', letterSpacing: '1.2px', padding: '0 8px', marginBottom: '5px' }}>CORE</div>
           {coreNav.map(item => (
-            <button key={item.id} onClick={() => setActiveTab(item.id)}
+            <button key={item.id} onClick={() => { setActiveTab(item.id); setSidebarOpen(false); }}
               style={{
                 display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px',
                 borderRadius: '7px', width: '100%', border: 'none', cursor: 'pointer',
@@ -897,6 +910,7 @@ export default function Dashboard() {
               <button key={item.id} onClick={() => {
                 if (locked) { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }
                 else setActiveTab(item.id);
+                setSidebarOpen(false);
               }}
                 style={{
                   display: 'flex', alignItems: 'center', gap: '9px', padding: '8px 10px',
@@ -971,39 +985,51 @@ export default function Dashboard() {
       </aside>
 
       {/* ─────────────────────── MAIN AREA ───────────────────────────────────── */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden', minWidth: 0 }}>
 
         {/* Topbar */}
-        <header style={{ background: '#fff', borderBottom: '0.5px solid #e5e7eb', padding: '11px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
-          <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>{pageTitles[activeTab]}</div>
+        <header style={{ background: '#fff', borderBottom: '0.5px solid #e5e7eb', padding: '11px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexShrink: 0 }}>
+																											
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* Hamburger — mobile only */}
+            <button className="lg:hidden" onClick={() => setSidebarOpen(true)}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', padding: '4px 6px 4px 0', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              <span style={{ width: '18px', height: '2px', background: '#374151', borderRadius: '2px', display: 'block' }} />
+              <span style={{ width: '18px', height: '2px', background: '#374151', borderRadius: '2px', display: 'block' }} />
+              <span style={{ width: '12px', height: '2px', background: '#374151', borderRadius: '2px', display: 'block' }} />
+            </button>
+            <div style={{ fontSize: '14px', fontWeight: 500, color: '#111827' }}>{pageTitles[activeTab]}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             {overdueCount > 0 && (
               <button onClick={() => { setActiveTab('leads'); setFilter('all'); }}
-                style={{ fontSize: '11px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer' }}>
-                ⚠️ {overdueCount} overdue follow-up{overdueCount > 1 ? 's' : ''}
+                style={{ fontSize: '11px', color: '#dc2626', background: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px', padding: '4px 8px', cursor: 'pointer' }}>
+                ⚠️ {overdueCount}
               </button>
             )}
             {institute.whatsapp_connected ? (
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '4px 10px' }}>
-                <span style={{ width: '6px', height: '6px', background: '#22c55e', borderRadius: '50%', display: 'inline-block' }} />
-                <span style={{ fontSize: '11px', color: '#15803d' }}>WhatsApp active · {institute.whatsapp_number}</span>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '4px 8px' }}>
+                <span style={{ width: '6px', height: '6px', background: '#22c55e', borderRadius: '50%', display: 'inline-block', flexShrink: 0 }} />
+                <span className="hidden sm:inline" style={{ fontSize: '11px', color: '#15803d' }}>WA active · {institute.whatsapp_number}</span>
+                <span className="sm:hidden" style={{ fontSize: '11px', color: '#15803d' }}>WA ✓</span>
                 <button onClick={() => void handleDisconnect()}
-                  style={{ marginLeft: '6px', fontSize: '10px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>Disconnect</button>
+                  className="hidden sm:inline"
+                  style={{ marginLeft: '4px', fontSize: '10px', color: '#ef4444', background: 'none', border: 'none', cursor: 'pointer', padding: 0 }}>✕</button>
               </div>
             ) : (
               <button onClick={() => void handleConnectWhatsApp()}
-                style={{ fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 12px', cursor: 'pointer', fontWeight: 500 }}>
-                🔗 Connect WhatsApp
+                style={{ fontSize: '11px', background: '#16a34a', color: '#fff', border: 'none', borderRadius: '6px', padding: '5px 10px', cursor: 'pointer', fontWeight: 500, whiteSpace: 'nowrap' }}>
+                🔗 <span className="hidden sm:inline">Connect </span>WhatsApp
               </button>
             )}
-            <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#eeedfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 500, color: '#534ab7' }}>
+            <div style={{ width: '30px', height: '30px', borderRadius: '50%', background: '#eeedfe', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11px', fontWeight: 500, color: '#534ab7', flexShrink: 0 }}>
               {institute.name.slice(0, 2).toUpperCase()}
             </div>
           </div>
         </header>
 
         {/* Scrollable content */}
-        <main style={{ flex: 1, overflowY: 'auto', padding: '20px 24px' }}>
+        <main style={{ flex: 1, overflowY: 'auto', padding: '16px' }} className="sm:p-6 pb-20 lg:pb-6">
 
           {/* ── Profile Completeness Banner ───────────────────────────────── */}
           {profileCompleteness && !profileCompleteness.complete && (
@@ -1860,6 +1886,42 @@ export default function Dashboard() {
       )}
 
         </main>
+
+        {/* ── Mobile Bottom Tab Bar ─────────────────────────────────────────── */}
+        {/* Visible only on mobile (lg:hidden), provides quick nav to core tabs */}
+        <nav className="lg:hidden" style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0,
+          background: '#13111e', borderTop: '1px solid #1e1c2e',
+          display: 'flex', alignItems: 'stretch', zIndex: 40, height: '60px',
+        }}>
+          {[
+            { id: 'leads' as Tab, label: 'Leads', icon: '📋' },
+            { id: 'whatsapp' as Tab, label: 'WhatsApp', icon: '📱' },
+            { id: 'profile' as Tab, label: 'Profile', icon: '🏫' },
+            { id: 'blocklist' as Tab, label: 'Blocklist', icon: '🚫' },
+          ].map(item => (
+            <button key={item.id} onClick={() => setActiveTab(item.id)} style={{
+              flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+              justifyContent: 'center', gap: '3px', background: 'none', border: 'none',
+              cursor: 'pointer', padding: '6px 0',
+              borderTop: activeTab === item.id ? '2px solid #7f77dd' : '2px solid transparent',
+            }}>
+              <span style={{ fontSize: '18px', lineHeight: 1 }}>{item.icon}</span>
+              <span style={{ fontSize: '9px', color: activeTab === item.id ? '#7f77dd' : '#4a4768', fontWeight: activeTab === item.id ? 600 : 400 }}>{item.label}</span>
+            </button>
+          ))}
+          {/* "More" button opens sidebar drawer for premium items */}
+          <button onClick={() => setSidebarOpen(true)} style={{
+            flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center',
+            justifyContent: 'center', gap: '3px', background: 'none', border: 'none',
+            cursor: 'pointer', padding: '6px 0',
+            borderTop: ['analytics','widget','training'].includes(activeTab) ? '2px solid #c9a55e' : '2px solid transparent',
+          }}>
+            <span style={{ fontSize: '18px', lineHeight: 1 }}>⭐</span>
+            <span style={{ fontSize: '9px', color: ['analytics','widget','training'].includes(activeTab) ? '#c9a55e' : '#4a4768', fontWeight: 400 }}>More</span>
+          </button>
+        </nav>
+
       </div>
     </div>
   );
