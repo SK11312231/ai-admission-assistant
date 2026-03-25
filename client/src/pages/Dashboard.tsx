@@ -203,6 +203,7 @@ export default function Dashboard() {
     follow_up_date: '',
   });
   const [addError, setAddError] = useState<string | null>(null);
+  const [addFieldErrors, setAddFieldErrors] = useState<Record<string, string>>({});
   const [addLoading, setAddLoading] = useState(false);
 
   // Upgrade modal
@@ -487,7 +488,41 @@ export default function Dashboard() {
   const handleAddLead = async () => {
     if (!institute) return;
     setAddError(null);
-    if (!addForm.student_phone.trim()) { setAddError('Phone number is required.'); return; }
+
+    // ── Validation ────────────────────────────────────────────────────────────
+    const fieldErrs: Record<string, string> = {};
+    const phone = addForm.student_phone.trim();
+    if (!phone) {
+      fieldErrs.student_phone = 'Phone number is required.';
+    } else {
+      const digitsOnly = phone.replace(/[\s\-\+\(\)]/g, '');
+      if (!/^\d+$/.test(digitsOnly)) {
+        fieldErrs.student_phone = 'Only digits allowed (spaces, +, - are fine).';
+      } else if (digitsOnly.length < 7 || digitsOnly.length > 15) {
+        fieldErrs.student_phone = 'Must be between 7 and 15 digits.';
+      }
+    }
+    if (addForm.student_name.trim().length > 100) {
+      fieldErrs.student_name = 'Must be under 100 characters.';
+    }
+    if (addForm.message.trim().length > 1000) {
+      fieldErrs.message = 'Must be under 1000 characters.';
+    }
+    if (addForm.notes.trim().length > 2000) {
+      fieldErrs.notes = 'Must be under 2000 characters.';
+    }
+    if (addForm.follow_up_date) {
+      const followUpDate = new Date(addForm.follow_up_date);
+      const today = new Date(); today.setHours(0, 0, 0, 0);
+      if (followUpDate < today) fieldErrs.follow_up_date = 'Cannot be in the past.';
+    }
+    if (Object.keys(fieldErrs).length > 0) {
+      setAddFieldErrors(fieldErrs);
+      setAddError('Please fix the errors below.');
+      return;
+    }
+    setAddFieldErrors({});
+
     setAddLoading(true);
     try {
       const res = await fetch(apiUrl('/api/leads'), {
@@ -499,6 +534,7 @@ export default function Dashboard() {
       setLeads(prev => [data, ...prev]);
       setShowAddLead(false);
       setAddForm({ student_name: '', student_phone: '', message: '', notes: '', follow_up_date: '' });
+      setAddFieldErrors({});
     } catch (err) {
       setAddError(err instanceof Error ? err.message : 'Failed to add lead.');
     } finally { setAddLoading(false); }
@@ -711,42 +747,50 @@ export default function Dashboard() {
           <div className="bg-white rounded-2xl shadow-xl w-full max-w-md p-6">
             <div className="flex items-center justify-between mb-5">
               <h2 className="text-lg font-bold text-gray-900">Add Lead Manually</h2>
-              <button onClick={() => setShowAddLead(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+              <button onClick={() => { setShowAddLead(false); setAddError(null); setAddFieldErrors({}); }} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
             </div>
             {addError && <div className="bg-red-50 border border-red-200 text-red-700 text-sm rounded-lg px-4 py-3 mb-4">{addError}</div>}
             <div className="space-y-3">
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Student Name <span className="text-gray-400">(optional)</span></label>
-                <input type="text" value={addForm.student_name} onChange={e => setAddForm(f => ({ ...f, student_name: e.target.value }))}
+                <input type="text" value={addForm.student_name} onChange={e => { setAddForm(f => ({ ...f, student_name: e.target.value })); setAddFieldErrors(fe => ({ ...fe, student_name: '' })); }}
                   placeholder="e.g. Rahul Sharma"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${addFieldErrors.student_name ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                {addFieldErrors.student_name && <p className="text-xs text-red-500 mt-1">⚠ {addFieldErrors.student_name}</p>}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Phone Number <span className="text-red-500">*</span></label>
-                <input type="tel" value={addForm.student_phone} onChange={e => setAddForm(f => ({ ...f, student_phone: e.target.value }))}
+                <input type="tel" value={addForm.student_phone} onChange={e => { setAddForm(f => ({ ...f, student_phone: e.target.value })); setAddFieldErrors(fe => ({ ...fe, student_phone: '' })); }}
                   placeholder="+91 9876543210"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${addFieldErrors.student_phone ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                {addFieldErrors.student_phone && <p className="text-xs text-red-500 mt-1">⚠ {addFieldErrors.student_phone}</p>}
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Initial Message <span className="text-gray-400">(optional)</span></label>
-                <input type="text" value={addForm.message} onChange={e => setAddForm(f => ({ ...f, message: e.target.value }))}
+                <input type="text" value={addForm.message} onChange={e => { setAddForm(f => ({ ...f, message: e.target.value })); setAddFieldErrors(fe => ({ ...fe, message: '' })); }}
                   placeholder="e.g. Interested in B.Tech admissions"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${addFieldErrors.message ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                {addFieldErrors.message && <p className="text-xs text-red-500 mt-1">⚠ {addFieldErrors.message}</p>}
+                <p className="text-xs text-gray-400 mt-0.5">{addForm.message.length}/1000</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Notes <span className="text-gray-400">(optional)</span></label>
-                <textarea value={addForm.notes} onChange={e => setAddForm(f => ({ ...f, notes: e.target.value }))}
+                <textarea value={addForm.notes} onChange={e => { setAddForm(f => ({ ...f, notes: e.target.value })); setAddFieldErrors(fe => ({ ...fe, notes: '' })); }}
                   rows={2} placeholder="Any additional notes…"
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none ${addFieldErrors.notes ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                {addFieldErrors.notes && <p className="text-xs text-red-500 mt-1">⚠ {addFieldErrors.notes}</p>}
+                <p className="text-xs text-gray-400 mt-0.5">{addForm.notes.length}/2000</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-gray-700 mb-1">Follow-up Date <span className="text-gray-400">(optional)</span></label>
-                <input type="date" value={addForm.follow_up_date} onChange={e => setAddForm(f => ({ ...f, follow_up_date: e.target.value }))}
-                  className="w-full px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                <input type="date" value={addForm.follow_up_date} onChange={e => { setAddForm(f => ({ ...f, follow_up_date: e.target.value })); setAddFieldErrors(fe => ({ ...fe, follow_up_date: '' })); }}
+                  min={new Date().toISOString().split('T')[0]}
+                  className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 ${addFieldErrors.follow_up_date ? 'border-red-400 bg-red-50' : 'border-gray-300'}`} />
+                {addFieldErrors.follow_up_date && <p className="text-xs text-red-500 mt-1">⚠ {addFieldErrors.follow_up_date}</p>}
               </div>
             </div>
             <div className="flex gap-3 mt-5">
-              <button onClick={() => setShowAddLead(false)}
+              <button onClick={() => { setShowAddLead(false); setAddError(null); setAddFieldErrors({}); }}
                 className="flex-1 border border-gray-300 text-gray-600 text-sm font-medium py-2.5 rounded-xl hover:bg-gray-50">Cancel</button>
               <button onClick={() => void handleAddLead()} disabled={addLoading}
                 className="flex-1 bg-indigo-600 text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50">
@@ -1537,31 +1581,39 @@ export default function Dashboard() {
           <div className="bg-gray-50 border border-gray-200 rounded-xl p-4 mb-5">
             <p className="text-sm font-medium text-gray-700 mb-3">Add a number manually</p>
             {addBlockError && (
-              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2 mb-3">{addBlockError}</div>
+              <div className="bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg px-3 py-2 mb-3">⚠ {addBlockError}</div>
             )}
             <div className="flex flex-col sm:flex-row gap-2">
               <input
                 type="tel"
                 value={newBlockPhone}
-                onChange={e => setNewBlockPhone(e.target.value)}
-                placeholder="Phone number e.g. 919876543210"
+                onChange={e => { setNewBlockPhone(e.target.value); setAddBlockError(null); }}
+                placeholder="Phone e.g. 919876543210"
                 className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <input
                 type="text"
                 value={newBlockReason}
-                onChange={e => setNewBlockReason(e.target.value)}
+                onChange={e => { setNewBlockReason(e.target.value); setAddBlockError(null); }}
                 placeholder="Reason (optional)"
+                maxLength={500}
                 className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500"
               />
               <button
                 onClick={() => {
-                  if (!institute || !newBlockPhone.trim()) { setAddBlockError('Phone number is required.'); return; }
-                  setAddingBlock(true); setAddBlockError(null);
+                  if (!institute) return;
+                  setAddBlockError(null);
+                  const phone = newBlockPhone.trim();
+                  if (!phone) { setAddBlockError('Phone number is required.'); return; }
+                  const digits = phone.replace(/[\s\-\+\(\)]/g, '');
+                  if (!/^\d+$/.test(digits)) { setAddBlockError('Phone must contain only digits.'); return; }
+                  if (digits.length < 7 || digits.length > 15) { setAddBlockError('Phone must be 7–15 digits.'); return; }
+                  if (newBlockReason.trim().length > 500) { setAddBlockError('Reason must be under 500 characters.'); return; }
+                  setAddingBlock(true);
                   fetch(apiUrl('/api/blocklist'), {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ institute_id: institute.id, phone: newBlockPhone.trim(), reason: newBlockReason.trim() || null }),
+                    body: JSON.stringify({ institute_id: institute.id, phone: phone, reason: newBlockReason.trim() || null }),
                   })
                     .then(async r => {
                       const d = await r.json() as BlockedNumber & { error?: string };

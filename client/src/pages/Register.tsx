@@ -38,7 +38,86 @@ export default function Register() {
     confirmPassword: '',
   });
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
+
+  // Clear field error as user types
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
+    setForm({ ...form, [e.target.name]: e.target.value });
+    setFieldErrors(prev => ({ ...prev, [e.target.name]: '' }));
+    setError(null);
+  };
+
+  const validateForm = (): boolean => {
+    const errs: Record<string, string> = {};
+
+    // Institute Name
+    if (!form.name.trim()) {
+      errs.name = 'Institute name is required.';
+    } else if (form.name.trim().length < 3) {
+      errs.name = 'Must be at least 3 characters.';
+    } else if (form.name.trim().length > 100) {
+      errs.name = 'Must be under 100 characters.';
+    }
+
+    // Email
+    if (!form.email.trim()) {
+      errs.email = 'Email is required.';
+    } else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
+      errs.email = 'Enter a valid email address.';
+    }
+
+    // Phone
+    const phoneDigits = form.phone.replace(/[\s\-\+\(\)]/g, '');
+    if (!form.phone.trim()) {
+      errs.phone = 'Phone number is required.';
+    } else if (!/^\d+$/.test(phoneDigits)) {
+      errs.phone = 'Only digits allowed (spaces, +, - are fine).';
+    } else if (phoneDigits.length < 7 || phoneDigits.length > 15) {
+      errs.phone = 'Must be between 7 and 15 digits.';
+    }
+
+    // WhatsApp
+    const waDigits = form.whatsapp_number.replace(/[\s\-\+\(\)]/g, '');
+    if (!form.whatsapp_number.trim()) {
+      errs.whatsapp_number = 'WhatsApp number is required.';
+    } else if (!/^\d+$/.test(waDigits)) {
+      errs.whatsapp_number = 'Only digits allowed (spaces, +, - are fine).';
+    } else if (waDigits.length < 7 || waDigits.length > 15) {
+      errs.whatsapp_number = 'Must be between 7 and 15 digits.';
+    }
+
+    // Website (optional but must be valid if provided)
+    if (form.website.trim()) {
+      try {
+        const url = new URL(form.website.trim().startsWith('http') ? form.website.trim() : `https://${form.website.trim()}`);
+        if (!['http:', 'https:'].includes(url.protocol)) {
+          errs.website = 'Must be a valid URL (e.g. https://yourinstitute.com).';
+        }
+      } catch {
+        errs.website = 'Must be a valid URL (e.g. https://yourinstitute.com).';
+      }
+    }
+
+    // Password
+    if (!form.password) {
+      errs.password = 'Password is required.';
+    } else if (form.password.length < 8) {
+      errs.password = 'Must be at least 8 characters.';
+    } else if (!/[A-Z]/.test(form.password) && !/[0-9]/.test(form.password) && !/[^a-zA-Z]/.test(form.password)) {
+      errs.password = 'Include at least one number or special character.';
+    }
+
+    // Confirm Password
+    if (!form.confirmPassword) {
+      errs.confirmPassword = 'Please confirm your password.';
+    } else if (form.password !== form.confirmPassword) {
+      errs.confirmPassword = 'Passwords do not match.';
+    }
+
+    setFieldErrors(errs);
+    return Object.keys(errs).length === 0;
+  };
 
   useEffect(() => {
     fetch(apiUrl('/api/plans'))
@@ -54,22 +133,19 @@ export default function Register() {
       });
   }, []);
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value });
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    if (form.password !== form.confirmPassword) {
-      setError('Passwords do not match.');
-      return;
-    }
+    if (!validateForm()) return;
 
     setLoading(true);
     try {
       const { confirmPassword: _, ...payload } = form;
+      // Auto-prefix website with https:// if missing
+      if (payload.website && !payload.website.startsWith('http')) {
+        payload.website = `https://${payload.website}`;
+      }
       const res = await fetch(apiUrl('/api/institutes/register'), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -80,7 +156,6 @@ export default function Register() {
       if (!res.ok) throw new Error(data.error ?? 'Registration failed.');
 
       localStorage.setItem('institute', JSON.stringify(data));
-      // Growth/Pro: go to complete-payment page for Razorpay checkout
       if (form.plan === 'growth' || form.plan === 'pro') {
         navigate('/complete-payment');
       } else {
@@ -129,35 +204,47 @@ export default function Register() {
 
           <form onSubmit={(e) => void handleSubmit(e)} className="space-y-4">
             <div>
-              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">Institute Name</label>
-              <input id="name" name="name" type="text" required
+              <label htmlFor="name" className="block text-sm font-medium text-gray-700 mb-1">
+                Institute Name <span className="text-red-500">*</span>
+              </label>
+              <input id="name" name="name" type="text"
                 value={form.name} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.name ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
                 placeholder="e.g. ABC Coaching Center" />
+              {fieldErrors.name && <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.name}</p>}
             </div>
 
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">Official Email</label>
-              <input id="email" name="email" type="email" required
+              <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-1">
+                Official Email <span className="text-red-500">*</span>
+              </label>
+              <input id="email" name="email" type="text"
                 value={form.email} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.email ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
                 placeholder="contact@institute.com" />
+              {fieldErrors.email && <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.email}</p>}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">Phone</label>
-                <input id="phone" name="phone" type="tel" required
+                <label htmlFor="phone" className="block text-sm font-medium text-gray-700 mb-1">
+                  Phone <span className="text-red-500">*</span>
+                </label>
+                <input id="phone" name="phone" type="tel"
                   value={form.phone} onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.phone ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
                   placeholder="+91 9876543210" />
+                {fieldErrors.phone && <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.phone}</p>}
               </div>
               <div>
-                <label htmlFor="whatsapp_number" className="block text-sm font-medium text-gray-700 mb-1">WhatsApp</label>
-                <input id="whatsapp_number" name="whatsapp_number" type="tel" required
+                <label htmlFor="whatsapp_number" className="block text-sm font-medium text-gray-700 mb-1">
+                  WhatsApp <span className="text-red-500">*</span>
+                </label>
+                <input id="whatsapp_number" name="whatsapp_number" type="tel"
                   value={form.whatsapp_number} onChange={handleChange}
-                  className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                  className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.whatsapp_number ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
                   placeholder="+91 9876543210" />
+                {fieldErrors.whatsapp_number && <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.whatsapp_number}</p>}
               </div>
             </div>
 
@@ -165,11 +252,14 @@ export default function Register() {
               <label htmlFor="website" className="block text-sm font-medium text-gray-700 mb-1">
                 Institute Website <span className="text-gray-400 font-normal">(optional)</span>
               </label>
-              <input id="website" name="website" type="url"
+              <input id="website" name="website" type="text"
                 value={form.website} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.website ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
                 placeholder="https://www.yourinstitute.com" />
-              <p className="text-xs text-gray-400 mt-1">We'll auto-generate your AI assistant's knowledge base from this.</p>
+              {fieldErrors.website
+                ? <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.website}</p>
+                : <p className="text-xs text-gray-400 mt-1">We'll auto-generate your AI assistant's knowledge base from this.</p>
+              }
             </div>
 
             {/* Plan selector */}
@@ -200,22 +290,35 @@ export default function Register() {
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">Password</label>
-              <input id="password" name="password" type="password" required minLength={6}
+              <label htmlFor="password" className="block text-sm font-medium text-gray-700 mb-1">
+                Password <span className="text-red-500">*</span>
+              </label>
+              <input id="password" name="password" type="password"
                 value={form.password} onChange={handleChange}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                placeholder="Min 6 characters" />
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.password ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                placeholder="Min 8 characters" />
+              {fieldErrors.password
+                ? <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.password}</p>
+                : form.password && form.password.length >= 8
+                  ? <p className="text-xs text-green-600 mt-1">✓ Password looks good.</p>
+                  : <p className="text-xs text-gray-400 mt-1">Min 8 characters with at least one number or special character.</p>
+              }
             </div>
 
             <div>
-              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">Confirm Password</label>
-              <input id="confirmPassword" name="confirmPassword" type="password" required minLength={6}
+              <label htmlFor="confirmPassword" className="block text-sm font-medium text-gray-700 mb-1">
+                Confirm Password <span className="text-red-500">*</span>
+              </label>
+              <input id="confirmPassword" name="confirmPassword" type="password"
                 value={form.confirmPassword} onChange={handleChange}
-                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${form.confirmPassword && form.password !== form.confirmPassword ? 'border-red-400 bg-red-50' : 'border-gray-300'}`}
+                className={`w-full px-4 py-2.5 border rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${fieldErrors.confirmPassword ? 'border-red-400 bg-red-50' : form.confirmPassword && form.password === form.confirmPassword ? 'border-green-400' : 'border-gray-300'}`}
                 placeholder="Re-enter your password" />
-              {form.confirmPassword && form.password !== form.confirmPassword && (
-                <p className="text-xs text-red-500 mt-1">Passwords do not match.</p>
-              )}
+              {fieldErrors.confirmPassword
+                ? <p className="text-xs text-red-500 mt-1">⚠ {fieldErrors.confirmPassword}</p>
+                : form.confirmPassword && form.password === form.confirmPassword
+                  ? <p className="text-xs text-green-600 mt-1">✓ Passwords match.</p>
+                  : null
+              }
             </div>
 
             <button type="submit" disabled={loading}
