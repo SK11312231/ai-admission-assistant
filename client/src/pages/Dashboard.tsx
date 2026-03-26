@@ -45,6 +45,8 @@ interface Institute {
   plan: string;
   is_paid: boolean;
   is_premium_accessible: boolean;
+  email_verified: boolean;
+  phone_verified: boolean;
   whatsapp_connected: boolean;
   whatsapp_waba_id?: string | null;
   whatsapp_phone_number_id?: string | null;
@@ -155,6 +157,14 @@ export default function Dashboard() {
   const [waStatus, setWaStatus] = useState<WAStatus>('idle');
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null);
   const [waError, setWaError] = useState<string | null>(null);
+  // Multi-number state
+  const [waNumbers, setWaNumbers] = useState<Array<{
+    id: number; slot: number; phone_number: string | null;
+    label: string; is_connected: boolean; status: string;
+  }>>([]);
+  const [waNumbersLoading, setWaNumbersLoading] = useState(false);
+  const [activeSlot, setActiveSlot] = useState(1); // which slot's QR modal is open
+  const [addingNumber, setAddingNumber] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Institute Profile
@@ -340,11 +350,24 @@ export default function Dashboard() {
   };
   useEffect(() => () => stopPolling(), []);
 
-  const startPolling = (inst: Institute) => {
+  const loadWaNumbers = async (inst: Institute) => {
+    setWaNumbersLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${inst.id}/whatsapp-numbers`));
+      if (res.ok) setWaNumbers(await res.json() as typeof waNumbers);
+    } catch { /* silent */ } finally { setWaNumbersLoading(false); }
+  };
+
+  // Load whatsapp numbers when tab is opened
+  useEffect(() => {
+    if (activeTab === 'whatsapp' && institute) void loadWaNumbers(institute);
+  }, [activeTab, institute]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const startPolling = (inst: Institute, slot = 1) => {
     stopPolling();
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(apiUrl(`/api/institutes/${inst.id}/whatsapp-status`));
+        const res = await fetch(apiUrl(`/api/institutes/${inst.id}/whatsapp-numbers/${slot}/status`));
         if (!res.ok) return;
         const data = await res.json() as { status: WAStatus; qr: string | null };
         setWaStatus(data.status);
@@ -352,9 +375,12 @@ export default function Dashboard() {
         if (data.status === 'connected') {
           stopPolling();
           setQrDataUrl(null);
-          const updated = { ...inst, whatsapp_connected: true };
-          setInstitute(updated);
-          localStorage.setItem('institute', JSON.stringify(updated));
+          if (slot === 1) {
+            const updated = { ...inst, whatsapp_connected: true };
+            setInstitute(updated);
+            localStorage.setItem('institute', JSON.stringify(updated));
+          }
+          void loadWaNumbers(inst);
           setTimeout(() => setShowQRModal(false), 2000);
         }
         if (data.status === 'disconnected') { stopPolling(); setWaError('Connection lost. Please try again.'); }
@@ -365,14 +391,56 @@ export default function Dashboard() {
   const handleConnectWhatsApp = async () => {
     if (!institute) return;
     setWaError(null); setQrDataUrl(null); setWaStatus('initializing'); setShowQRModal(true);
+    setActiveSlot(1);
     try {
       const res = await fetch(apiUrl(`/api/institutes/${institute.id}/connect-whatsapp`), { method: 'POST' });
       if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error); }
-      startPolling(institute);
+      startPolling(institute, 1);
     } catch (err) {
       setWaError(err instanceof Error ? err.message : 'Something went wrong.');
       setWaStatus('idle');
     }
+  };
+
+  const handleConnectSlot = async (slot: number) => {
+    if (!institute) return;
+    setWaError(null); setQrDataUrl(null); setWaStatus('initializing');
+    setActiveSlot(slot); setShowQRModal(true);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/whatsapp-numbers/${slot}/connect`), { method: 'POST' });
+      if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error); }
+      startPolling(institute, slot);
+    } catch (err) {
+      setWaError(err instanceof Error ? err.message : 'Something went wrong.');
+      setWaStatus('idle'); setShowQRModal(false);
+    }
+  };
+
+  const handleDisconnectSlot = async (slot: number) => {
+    if (!institute) return;
+    if (!window.confirm(`Disconnect WhatsApp number ${slot}? You'll need to scan a QR code again to reconnect.`)) return;
+    await fetch(apiUrl(`/api/institutes/${institute.id}/whatsapp-numbers/${slot}`), { method: 'DELETE' });
+    if (slot === 1) {
+      const updated = { ...institute, whatsapp_connected: false };
+      setInstitute(updated);
+      localStorage.setItem('institute', JSON.stringify(updated));
+    }
+    void loadWaNumbers(institute);
+  };
+
+  const handleAddNumber = async () => {
+    if (!institute) return;
+    setAddingNumber(true);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/whatsapp-numbers`), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      const data = await res.json() as { error?: string; slot?: number };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to add number.');
+      void loadWaNumbers(institute);
+      // Auto-open connect QR for the new slot
+      if (data.slot) void handleConnectSlot(data.slot);
+    } catch (err) {
+      alert(err instanceof Error ? err.message : 'Failed to add number.');
+    } finally { setAddingNumber(false); }
   };
 
   const handleDisconnect = async () => {
@@ -382,6 +450,7 @@ export default function Dashboard() {
     const updated = { ...institute, whatsapp_connected: false };
     setInstitute(updated);
     localStorage.setItem('institute', JSON.stringify(updated));
+    void loadWaNumbers(institute);
   };
 
   // ── Profile ─────────────────────────────────────────────────────────────────
@@ -1084,6 +1153,39 @@ export default function Dashboard() {
 
         {/* Scrollable content */}
         <main style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 80px' }} className="dashboard-main">
+
+          {/* ── Verification Banner ──────────────────────────────────────── */}
+          {institute && (!institute.email_verified || !institute.phone_verified) && (
+            <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+                <span style={{ fontSize: '18px', flexShrink: 0 }}>⚠️</span>
+                <div>
+                  <p style={{ fontSize: '13px', fontWeight: 600, color: '#92400e', marginBottom: '4px' }}>
+                    Complete your account verification
+                  </p>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                    {!institute.email_verified && (
+                      <a href={`/verify-email-pending`}
+                        style={{ fontSize: '11px', color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', padding: '3px 10px', textDecoration: 'none', fontWeight: 500 }}>
+                        📧 Verify Email →
+                      </a>
+                    )}
+                    {institute.email_verified && !institute.phone_verified && (
+                      <a href={`/verify-phone?id=${institute.id}`}
+                        style={{ fontSize: '11px', color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', padding: '3px 10px', textDecoration: 'none', fontWeight: 500 }}>
+                        📱 Verify WhatsApp →
+                      </a>
+                    )}
+                    {!institute.email_verified && (
+                      <span style={{ fontSize: '11px', color: '#a16207' }}>
+                        Check your inbox at {institute.email}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ── Profile Completeness Banner ───────────────────────────────── */}
           {profileCompleteness && !profileCompleteness.complete && (
@@ -1852,42 +1954,107 @@ export default function Dashboard() {
       {/* ── WhatsApp Tab ─────────────────────────────────────────────────────── */}
       {activeTab === 'whatsapp' && institute && (
         <div>
-          <div className="flex items-center gap-3 mb-6">
-            <div style={{ width: '36px', height: '36px', borderRadius: '10px', background: 'linear-gradient(135deg, #25D366, #128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px' }}>
-              📱
+          <div className="flex items-center justify-between mb-6">
+            <div className="flex items-center gap-3">
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#25D366,#128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📱</div>
+				  
+				  
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">WhatsApp Numbers</h2>
+                <p className="text-xs text-gray-500 mt-0.5">
+                  {institute.plan === 'starter' ? '1 number on Starter plan' : institute.plan === 'growth' ? 'Up to 2 numbers on Growth plan' : 'Unlimited numbers on Pro plan'}
+                </p>
+              </div>
             </div>
-            <div>
-              <h2 className="text-base font-semibold text-gray-900">WhatsApp Connect</h2>
-              <p className="text-xs text-gray-500 mt-0.5">Connect your WhatsApp Business Account via Meta Embedded Signup.</p>
-            </div>
+            {/* Add Number button — Growth/Pro only */}
+            {institute.plan !== 'starter' && (
+              <button onClick={() => void handleAddNumber()} disabled={addingNumber}
+                className="flex items-center gap-2 bg-green-600 text-white text-sm font-semibold px-4 py-2 rounded-xl hover:bg-green-700 disabled:opacity-50 transition-colors">
+                {addingNumber ? <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" /> : '➕'}
+                Add Number
+              </button>
+            )}
           </div>
-          <div className="max-w-xl">
-            <EmbeddedSignup
-              instituteId={institute.id}
-              isConnected={institute.whatsapp_connected}
-              wabaId={institute.whatsapp_waba_id ?? null}
-              phoneNumberId={institute.whatsapp_phone_number_id ?? null}
-              onConnected={(wabaId, phoneNumberId) => {
-                const updated = {
-                  ...institute,
-                  whatsapp_connected: true,
-                  whatsapp_waba_id: wabaId,
-                  whatsapp_phone_number_id: phoneNumberId,
-                };
-                setInstitute(updated);
-                localStorage.setItem('institute', JSON.stringify(updated));
-              }}
-              onDisconnected={() => {
-                const updated = {
-                  ...institute,
-                  whatsapp_connected: false,
-                  whatsapp_waba_id: null,
-                  whatsapp_phone_number_id: null,
-                };
-                setInstitute(updated);
-                localStorage.setItem('institute', JSON.stringify(updated));
-              }}
-            />
+
+          {/* Number list */}
+          {waNumbersLoading ? (
+            <div className="text-center py-12"><div className="w-8 h-8 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-3" /><p className="text-sm text-gray-400">Loading…</p></div>
+          ) : waNumbers.length === 0 ? (
+            /* No numbers yet — show connect prompt */
+            <div className="bg-white border border-gray-200 rounded-2xl p-8 text-center max-w-sm mx-auto">
+              <div className="text-4xl mb-4">📱</div>
+              <h3 className="font-semibold text-gray-900 mb-2">Connect your first WhatsApp number</h3>
+              <p className="text-sm text-gray-500 mb-5">Scan a QR code to link your institute's WhatsApp — takes under 60 seconds.</p>
+              <button onClick={() => void handleConnectWhatsApp()}
+                className="w-full bg-green-600 text-white font-semibold py-2.5 rounded-xl hover:bg-green-700 transition-colors text-sm">
+                🔗 Connect WhatsApp
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3 max-w-xl">
+              {waNumbers.map(num => (
+                <div key={num.slot} className="bg-white border border-gray-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+                  <div className="flex items-center gap-3 min-w-0">
+                    {/* Status indicator */}
+                    <div className={`w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0 ${num.status === 'connected' ? 'bg-green-50' : 'bg-gray-100'}`}>
+                      📱
+                    </div>
+                    <div className="min-w-0">
+                      <p className="font-medium text-gray-900 text-sm truncate">{num.label}</p>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <span className={`inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full ${num.status === 'connected' ? 'bg-green-100 text-green-700' : 'bg-gray-100 text-gray-500'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full inline-block ${num.status === 'connected' ? 'bg-green-500' : 'bg-gray-400'}`} />
+                          {num.status === 'connected' ? 'Connected' : 'Not connected'}
+                        </span>
+                        {num.phone_number && <span className="text-xs text-gray-400">{num.phone_number}</span>}
+                      </div>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 flex-shrink-0">
+                    {num.status === 'connected' ? (
+                      <button onClick={() => void handleDisconnectSlot(num.slot)}
+                        className="text-xs text-red-500 border border-red-200 hover:bg-red-50 px-3 py-1.5 rounded-lg transition-colors">
+                        Disconnect
+                      </button>
+                    ) : (
+                      <button onClick={() => void handleConnectSlot(num.slot)}
+                        className="text-xs bg-green-600 text-white font-semibold px-3 py-1.5 rounded-lg hover:bg-green-700 transition-colors">
+                        Connect →
+                      </button>
+                    )}
+                    {num.slot > 1 && num.status !== 'connected' && (
+                      <button onClick={() => void handleDisconnectSlot(num.slot)}
+                        className="text-xs text-gray-400 hover:text-red-500 transition-colors px-1">✕</button>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {/* Starter upsell if only 1 number and on starter */}
+              {institute.plan === 'starter' && (
+                <div className="bg-indigo-50 border border-indigo-100 rounded-2xl p-4 text-center">
+                  <p className="text-sm font-semibold text-indigo-800 mb-1">Need more WhatsApp numbers?</p>
+                  <p className="text-xs text-indigo-600 mb-3">Upgrade to Growth to connect 2 numbers, or Pro for unlimited.</p>
+                  <button onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+                    className="text-xs bg-indigo-600 text-white font-semibold px-4 py-1.5 rounded-lg hover:bg-indigo-700 transition-colors">
+                    ⬆️ Upgrade Plan
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* How to connect guide */}
+          <div className="mt-8 bg-gray-50 rounded-2xl p-5 max-w-xl">
+            <p className="text-xs font-bold text-gray-700 uppercase tracking-widest mb-3">How to connect</p>
+            <div className="space-y-2">
+              {['Open WhatsApp on your phone', 'Tap ⋮ Menu → Linked Devices → Link a Device', 'Scan the QR code shown on screen', 'Done — AI starts replying automatically'].map((step, i) => (
+                <div key={i} className="flex items-center gap-3">
+                  <span className="w-5 h-5 rounded-full bg-green-600 text-white text-xs flex items-center justify-center flex-shrink-0 font-bold">{i + 1}</span>
+                  <span className="text-sm text-gray-600">{step}</span>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
       )}

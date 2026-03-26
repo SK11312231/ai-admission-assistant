@@ -542,7 +542,7 @@ export async function initSession(instituteId: string): Promise<void> {
     // ── Cross-institute loop prevention ──────────────────────────────────
     // If the sender is another institute in our system, skip AI reply
     // to prevent infinite AI-to-AI loop. Still save as lead for manual review.
-																		  
+					
     const crossCheck = await pool.query(
       `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
       [phoneClean],
@@ -553,8 +553,8 @@ export async function initSession(instituteId: string): Promise<void> {
       return;
     }
 
-																		   
-								 
+					 
+		 
 
     // Save lead first — checks status (lost/converted → skip reply)
     const { skipReply } = await saveLead(Number(instituteId), studentPhone, messageText);
@@ -577,7 +577,7 @@ export async function initSession(instituteId: string): Promise<void> {
       console.error(`[WA] Failed to send reply:`, err);
     }
 
-																  
+				  
   });
 
   try {
@@ -642,4 +642,30 @@ export async function restoreAllSessions(): Promise<void> {
   catch (err) {
     console.error('[WA] restoreAllSessions failed:', err);
   }
+}
+// ── Send OTP via WhatsApp ─────────────────────────────────────────────────────
+// Uses any currently connected WhatsApp session to send an OTP to a phone number.
+// The OTP is sent as a WhatsApp message from the first available institute session.
+
+export async function sendOTPViaWhatsApp(
+  toPhone: string,
+  otp: string,
+): Promise<boolean> {
+  // Find any connected session
+  for (const [, state] of sessions.entries()) {
+    if (state.status === 'connected') {
+      try {
+        const toNumber = toPhone.replace(/[\s\-\+]/g, '');
+        await state.client.sendMessage(`${toNumber}@c.us`,
+          `🔐 *InquiAI Verification Code*\n\nYour OTP is: *${otp}*\n\nThis code expires in 10 minutes. Do not share it with anyone.`
+        );
+        console.log(`[WA] OTP sent to ${toPhone}`);
+        return true;
+      } catch (err) {
+        console.error(`[WA] OTP send failed:`, err);
+      }
+    }
+  }
+  console.warn(`[WA] No connected session available to send OTP to ${toPhone}`);
+  return false;
 }
