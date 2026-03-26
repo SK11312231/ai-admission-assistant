@@ -419,8 +419,7 @@ function makeClient(instituteId: string): Client {
 // ── Init session ─────────────────────────────────────────────────────────────
 
 export async function initSession(instituteId: string, slot = 1): Promise<void> {
-  // sessionKey format: "instituteId-slot" e.g. "42-1", "42-2"
-  // For slot 1 (default/legacy), the key is just "instituteId-1"
+  // sessionKey: slot 1 uses bare instituteId (legacy), slot 2+ uses "instituteId-slot"
   const sessionKey = slot === 1 ? instituteId : `${instituteId}-${slot}`;
 
   if (initLocks.has(sessionKey)) {
@@ -434,9 +433,11 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
 
   // ── WhatsApp session limit check ──────────────────────────────────────────
   const plan = await getInstitutePlan(Number(instituteId));
-  const connectedCount = [...sessions.entries()].filter(
-    ([key, s]) => key.startsWith(`${instituteId}`) && s.status === 'connected'
-  ).length + (sessions.get(instituteId)?.status === 'connected' ? 1 : 0);
+  // IMPORTANT: use exact regex match — startsWith("1") would incorrectly match "10", "11" etc.
+  const connectedCount = [...sessions.entries()].filter(([key, s]) => {
+    if (s.status !== 'connected') return false;
+    return key === instituteId || key.match(new RegExp(`^${instituteId}-\d+$`)) !== null;
+  }).length;
 
   const sessionCheck = await checkWhatsAppSessionLimit(Number(instituteId), plan, connectedCount);
   if (!sessionCheck.allowed) {
@@ -491,6 +492,7 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
       sessions.delete(sessionKey);
       initLocks.delete(sessionKey);
       void pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
+      if (slot === 1) void pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
     }, 90_000);
   });
 
@@ -600,20 +602,22 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
 // ── Exports ──────────────────────────────────────────────────────────────────
 
 export function getSessionState(instituteId: string, slot = 1): { status: WAStatus; qr: string | null } {
+  // Slot 1 uses the bare instituteId as key (legacy/default)
+  // Slot 2+ uses "instituteId-slot" format
   const sessionKey = slot === 1 ? instituteId : `${instituteId}-${slot}`;
   const s = sessions.get(sessionKey);
   return s ? { status: s.status, qr: s.qr } : { status: 'disconnected', qr: null };
 }
 
-// Returns all active session states for an institute (all slots)
+// Returns all active session states for an institute across all slots
 export function getAllSessionStates(instituteId: string): Array<{ slot: number; status: WAStatus; qr: string | null }> {
   const result: Array<{ slot: number; status: WAStatus; qr: string | null }> = [];
-  // Slot 1 uses just instituteId as key (legacy)
+  // Slot 1 uses bare instituteId as key
   const s1 = sessions.get(instituteId);
   if (s1) result.push({ slot: 1, status: s1.status, qr: s1.qr });
-  // Slots 2+ use "instituteId-slot" format
+  // Slots 2+ use "instituteId-N" format — use exact regex to avoid matching other institutes
   for (const [key, state] of sessions.entries()) {
-    const match = key.match(new RegExp(`^${instituteId}-(\d+)$`));
+    const match = key.match(new RegExp(`^${instituteId}-(\\d+)$`));
     if (match) {
       result.push({ slot: parseInt(match[1], 10), status: state.status, qr: state.qr });
     }
@@ -628,10 +632,12 @@ export async function disconnectSession(instituteId: string, slot = 1): Promise<
   try { await s.client.destroy(); } catch { /* ignore */ }
   sessions.delete(sessionKey);
   initLocks.delete(sessionKey);
+  // Update institute_whatsapp_numbers table for slot-specific disconnect
   await pool.query(
     `UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`,
     [sessionKey],
   );
+  // Slot 1 also updates the main institutes table for backward compatibility
   if (slot === 1) {
     await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
   }
