@@ -659,3 +659,39 @@ export async function sendInvoiceEmail(opts: {
 
   console.log(`[Email] Invoice sent to ${toEmail} (${invoiceNumber})`);
 }
+
+// ── 12. Email Verification (Magic Link) ──────────────────────────────────────
+
+export async function sendEmailVerificationEmail(opts: {
+  toEmail: string;
+  instituteName: string;
+  verifyUrl: string;
+}): Promise<void> {
+  const { toEmail, instituteName, verifyUrl } = opts;
+
+  const body = `
+    <h2 style="margin:0 0 8px;color:#111827;font-size:20px;">✉️ Verify Your Email Address</h2>
+    <p style="color:#6b7280;margin:0 0 24px;font-size:14px;">
+      Hi <strong>${instituteName}</strong>! Welcome to InquiAI. Click the button below to verify your email address and complete your registration.
+    </p>
+    ${infoBox(`
+      <p style="margin:0;font-size:13px;color:#374151;">
+        This verification link expires in <strong>24 hours</strong>.
+        If you didn't create an InquiAI account, you can safely ignore this email.
+      </p>
+    `, '#4f46e5')}
+    ${ctaButton('✅ Verify My Email →', verifyUrl)}
+    <p style="color:#9ca3af;font-size:12px;margin-top:16px;text-align:center;">
+      Or copy this link into your browser:<br/>
+      <span style="color:#6b7280;word-break:break-all;">${verifyUrl}</span>
+    </p>
+  `;
+
+  await sendEmail({
+    to: toEmail,
+    subject: `✅ Verify your email — InquiAI`,
+    html: baseTemplate('Verify Your Email', body),
+  });
+
+  console.log(`[Email] Verification email sent to ${toEmail}`);
+}

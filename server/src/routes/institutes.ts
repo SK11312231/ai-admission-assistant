@@ -2,9 +2,10 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import qrcode from 'qrcode';
 import pool from '../db';
-import { initSession, getSessionState, disconnectSession } from './whatsappManager';
+import { initSession, getSessionState, disconnectSession, sendOTPViaWhatsApp } from './whatsappManager';
 import { scrapeAndEnrich, getInstituteDetails, scoreProfileCompleteness } from './instituteEnrichment';
-import { sendWelcomeEmail, sendPasswordResetEmail } from './emailService';
+import { sendWelcomeEmail, sendPasswordResetEmail, sendEmailVerificationEmail } from './emailService';
+import { getLimits, getInstitutePlan } from './planLimits';
 
 const router = Router();
 
@@ -18,6 +19,8 @@ interface InstituteRow {
   plan: string;
   is_paid: boolean;
   is_premium_accessible: boolean;
+  email_verified: boolean;
+  phone_verified: boolean;
   password_hash: string;
   created_at: string;
   whatsapp_connected: boolean;
@@ -97,14 +100,17 @@ router.post('/register', async (req: Request, res: Response) => {
     `);
 
     const passwordHash = hashPassword(password);
-    // Starter gets trial (is_paid = true), Growth/Pro require payment (is_paid = false)
-    // is_premium_accessible is ALWAYS false on registration — set to true only after Growth/Pro payment
     const isPaid = plan === 'starter';
-    const isPremiumAccessible = false; // never true at registration
+    const isPremiumAccessible = false;
+
+    // Email verification token (24h expiry)
+    const emailVerifyToken = crypto.randomBytes(32).toString('hex');
+    const emailVerifyExpires = new Date(Date.now() + 24 * 60 * 60 * 1000);
 
     const result = await pool.query(
-      `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash, is_paid, is_premium_accessible)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9) RETURNING id, created_at`,
+      `INSERT INTO institutes (name, email, phone, whatsapp_number, website, plan, password_hash,
+        is_paid, is_premium_accessible, email_verified, email_verify_token, email_verify_expires, phone_verified)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, FALSE, $10, $11, FALSE) RETURNING id, created_at`,
       [
         name.trim(),
         email.trim().toLowerCase(),
@@ -115,21 +121,21 @@ router.post('/register', async (req: Request, res: Response) => {
         passwordHash,
         isPaid,
         isPremiumAccessible,
+        emailVerifyToken,
+        emailVerifyExpires,
       ]
     );
 
     const newId: number = result.rows[0].id;
-
-    // Fire-and-forget: enrich institute data in background (does not block registration response)
     void scrapeAndEnrich(newId, name.trim(), websiteClean);
 
-    // Send welcome email only for Starter (paid plans get email after payment)
-    if (isPaid) {
-      void sendWelcomeEmail({
-        toEmail: email.trim().toLowerCase(),
-        instituteName: name.trim(),
-      }).catch(err => console.error('[Email] Welcome email failed:', err));
-    }
+    // Send email verification (welcome email sent after email is verified)
+    const clientUrl = process.env.CLIENT_URL ?? 'https://inquiai.in';
+    void sendEmailVerificationEmail({
+      toEmail: email.trim().toLowerCase(),
+      instituteName: name.trim(),
+      verifyUrl: `${clientUrl}/verify-email?token=${emailVerifyToken}`,
+    }).catch(err => console.error('[Email] Verification email failed:', err));
 
     res.status(201).json({
       id: newId,
@@ -141,12 +147,149 @@ router.post('/register', async (req: Request, res: Response) => {
       plan,
       is_paid: isPaid,
       is_premium_accessible: isPremiumAccessible,
+      email_verified: false,
+      phone_verified: false,
       whatsapp_connected: false,
       created_at: result.rows[0].created_at as string,
     });
   } catch (err) {
     console.error('Registration error:', err);
     res.status(500).json({ error: 'Failed to register institute.' });
+  }
+});
+
+// ── GET /api/institutes/verify-email?token=xxx ───────────────────────────────
+router.get('/verify-email', async (req: Request, res: Response) => {
+  const { token } = req.query as { token?: string };
+  if (!token) { res.status(400).json({ error: 'Missing token.' }); return; }
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, email_verified, email_verify_expires
+       FROM institutes WHERE email_verify_token = $1 AND is_active = TRUE LIMIT 1`,
+      [token],
+    );
+    const inst = result.rows[0] as {
+      id: number; name: string; email: string;
+      email_verified: boolean; email_verify_expires: Date;
+    } | undefined;
+    if (!inst) { res.status(400).json({ error: 'Invalid or expired verification link.' }); return; }
+    if (inst.email_verified) { res.json({ success: true, already_verified: true }); return; }
+    if (new Date() > new Date(inst.email_verify_expires)) {
+      res.status(400).json({ error: 'Verification link has expired. Please request a new one.' }); return;
+    }
+    await pool.query(
+      `UPDATE institutes SET email_verified = TRUE, email_verify_token = NULL, email_verify_expires = NULL WHERE id = $1`,
+      [inst.id],
+    );
+    // Send welcome email now that email is confirmed
+    void sendWelcomeEmail({ toEmail: inst.email, instituteName: inst.name })
+      .catch(err => console.error('[Email] Welcome email failed:', err));
+    console.log(`[Verify] Email verified for institute ${inst.id}`);
+    res.json({ success: true, institute_id: inst.id, name: inst.name, email: inst.email });
+  } catch (err) {
+    console.error('Email verify error:', err);
+    res.status(500).json({ error: 'Verification failed.' });
+  }
+});
+
+// ── POST /api/institutes/:id/resend-verification-email ───────────────────────
+router.post('/:id/resend-verification-email', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT name, email, email_verified FROM institutes WHERE id = $1 AND is_active = TRUE`, [id],
+    );
+    const inst = result.rows[0] as { name: string; email: string; email_verified: boolean } | undefined;
+    if (!inst) { res.status(404).json({ error: 'Not found.' }); return; }
+    if (inst.email_verified) { res.json({ success: true, already_verified: true }); return; }
+    const token = crypto.randomBytes(32).toString('hex');
+    const expires = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    await pool.query(
+      `UPDATE institutes SET email_verify_token = $1, email_verify_expires = $2 WHERE id = $3`,
+      [token, expires, id],
+    );
+    const clientUrl = process.env.CLIENT_URL ?? 'https://inquiai.in';
+    void sendEmailVerificationEmail({
+      toEmail: inst.email, instituteName: inst.name,
+      verifyUrl: `${clientUrl}/verify-email?token=${token}`,
+    });
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to resend.' });
+  }
+});
+
+// ── POST /api/institutes/:id/send-phone-otp ───────────────────────────────────
+router.post('/:id/send-phone-otp', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT whatsapp_number, phone_verified FROM institutes WHERE id = $1 AND is_active = TRUE`, [id],
+    );
+    const inst = result.rows[0] as { whatsapp_number: string; phone_verified: boolean } | undefined;
+    if (!inst) { res.status(404).json({ error: 'Institute not found.' }); return; }
+    if (inst.phone_verified) { res.json({ success: true, already_verified: true }); return; }
+    const otp = Math.floor(100000 + Math.random() * 900000).toString();
+    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    await pool.query(
+      `UPDATE institutes SET phone_otp = $1, phone_otp_expires = $2 WHERE id = $3`,
+      [otp, otpExpires, id],
+    );
+    const sent = await sendOTPViaWhatsApp(inst.whatsapp_number, otp);
+    if (!sent) {
+      res.status(503).json({ error: 'Could not send OTP via WhatsApp. Please ensure at least one WhatsApp session is active on the platform.' });
+      return;
+    }
+    const masked = inst.whatsapp_number.slice(-4).padStart(inst.whatsapp_number.length, '*');
+    res.json({ success: true, phone: masked });
+  } catch (err) {
+    console.error('Send OTP error:', err);
+    res.status(500).json({ error: 'Failed to send OTP.' });
+  }
+});
+
+// ── POST /api/institutes/:id/verify-phone-otp ─────────────────────────────────
+router.post('/:id/verify-phone-otp', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { otp } = req.body as { otp?: string };
+  if (!otp?.trim()) { res.status(400).json({ error: 'OTP is required.' }); return; }
+  try {
+    const result = await pool.query(
+      `SELECT phone_otp, phone_otp_expires, phone_verified, name, email, plan,
+              is_paid, is_premium_accessible, whatsapp_number, email_verified, created_at
+       FROM institutes WHERE id = $1 AND is_active = TRUE`, [id],
+    );
+    const inst = result.rows[0] as {
+      phone_otp: string | null; phone_otp_expires: Date | null;
+      phone_verified: boolean; name: string; email: string; plan: string;
+      is_paid: boolean; is_premium_accessible: boolean;
+      whatsapp_number: string; email_verified: boolean; created_at: string;
+    } | undefined;
+    if (!inst) { res.status(404).json({ error: 'Institute not found.' }); return; }
+    if (inst.phone_verified) { res.json({ success: true, already_verified: true }); return; }
+    if (!inst.phone_otp || inst.phone_otp !== otp.trim()) {
+      res.status(400).json({ error: 'Incorrect OTP. Please try again.' }); return;
+    }
+    if (!inst.phone_otp_expires || new Date() > new Date(inst.phone_otp_expires)) {
+      res.status(400).json({ error: 'OTP has expired. Please request a new one.' }); return;
+    }
+    await pool.query(
+      `UPDATE institutes SET phone_verified = TRUE, phone_otp = NULL, phone_otp_expires = NULL WHERE id = $1`, [id],
+    );
+    console.log(`[Verify] Phone verified for institute ${id}`);
+    res.json({
+      success: true,
+      institute: {
+        id, name: inst.name, email: inst.email, plan: inst.plan,
+        is_paid: inst.is_paid, is_premium_accessible: inst.is_premium_accessible,
+        email_verified: inst.email_verified, phone_verified: true,
+        whatsapp_number: inst.whatsapp_number, whatsapp_connected: false,
+        created_at: inst.created_at,
+      },
+    });
+  } catch (err) {
+    console.error('Verify OTP error:', err);
+    res.status(500).json({ error: 'Verification failed.' });
   }
 });
 
@@ -225,6 +368,8 @@ router.post('/login', async (req: Request, res: Response) => {
           plan: institute.plan,
           is_paid: false,
           is_premium_accessible: false,
+          email_verified: institute.email_verified ?? false,
+          phone_verified: institute.phone_verified ?? false,
           whatsapp_connected: false,
           created_at: institute.created_at,
         },
@@ -242,6 +387,8 @@ router.post('/login', async (req: Request, res: Response) => {
       plan: institute.plan,
       is_paid: true,
       is_premium_accessible: institute.is_premium_accessible ?? false,
+      email_verified: institute.email_verified ?? false,
+      phone_verified: institute.phone_verified ?? false,
       whatsapp_connected: institute.whatsapp_connected ?? false,
       created_at: institute.created_at,
     });

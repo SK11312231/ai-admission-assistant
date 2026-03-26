@@ -49,6 +49,16 @@ export async function initDB(): Promise<void> {
   // Backfill: existing paid Growth/Pro institutes get premium access
   await pool.query(`UPDATE institutes SET is_premium_accessible = TRUE WHERE plan IN ('growth','pro') AND is_paid = TRUE AND is_active = TRUE`);
 
+  // ── Email & Phone Verification ────────────────────────────────────────────
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS email_verify_token TEXT`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS email_verify_expires TIMESTAMPTZ`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT FALSE`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS phone_otp TEXT`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS phone_otp_expires TIMESTAMPTZ`);
+  // Backfill: existing institutes are grandfathered as verified
+  await pool.query(`UPDATE institutes SET email_verified = TRUE, phone_verified = TRUE WHERE email_verified = FALSE`);
+
   // ── Migrate old plan slugs to new slugs ────────────────────────────────────
   // 'free'     → 'starter'  (old free-trial plan maps to starter)
   // 'advance'  → 'starter'  (typo variant in old CHECK constraint)
@@ -402,6 +412,32 @@ export async function initDB(): Promise<void> {
       ON sequence_executions (lead_id)
   `);
   console.log('  ✅ sequence_executions table ready');
+
+  // ── 17. institute_whatsapp_numbers ────────────────────────────────────────
+  // Supports multiple WhatsApp numbers per institute (Growth=2, Pro=unlimited)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS institute_whatsapp_numbers (
+      id            SERIAL PRIMARY KEY,
+      institute_id  INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      slot          INTEGER NOT NULL DEFAULT 1,
+      phone_number  TEXT,
+      label         TEXT NOT NULL DEFAULT 'WhatsApp Number',
+      is_connected  BOOLEAN NOT NULL DEFAULT FALSE,
+      session_key   TEXT UNIQUE,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      UNIQUE(institute_id, slot)
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_wa_numbers_institute ON institute_whatsapp_numbers (institute_id)`);
+  // Migrate existing connected institutes → slot 1
+  await pool.query(`
+    INSERT INTO institute_whatsapp_numbers (institute_id, slot, label, is_connected, session_key)
+    SELECT id, 1, 'Main Number', whatsapp_connected, id::text || '-1'
+    FROM institutes
+    WHERE whatsapp_number IS NOT NULL AND whatsapp_number != ''
+    ON CONFLICT (institute_id, slot) DO NOTHING
+  `);
+  console.log('  ✅ institute_whatsapp_numbers table ready');
 
   console.log('✅ initDB() complete — all tables ready.');
 }
