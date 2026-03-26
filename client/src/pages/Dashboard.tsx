@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
-import EmbeddedSignup from '../components/EmbeddedSignup';
+														  
 
 // ── Razorpay global type declaration ─────────────────────────────────────────
 declare global {
@@ -163,7 +163,7 @@ export default function Dashboard() {
     label: string; is_connected: boolean; status: string;
   }>>([]);
   const [waNumbersLoading, setWaNumbersLoading] = useState(false);
-  const [activeSlot, setActiveSlot] = useState(1); // which slot's QR modal is open
+																				   
   const [addingNumber, setAddingNumber] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -391,7 +391,7 @@ export default function Dashboard() {
   const handleConnectWhatsApp = async () => {
     if (!institute) return;
     setWaError(null); setQrDataUrl(null); setWaStatus('initializing'); setShowQRModal(true);
-    setActiveSlot(1);
+					 
     try {
       const res = await fetch(apiUrl(`/api/institutes/${institute.id}/connect-whatsapp`), { method: 'POST' });
       if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error); }
@@ -405,7 +405,7 @@ export default function Dashboard() {
   const handleConnectSlot = async (slot: number) => {
     if (!institute) return;
     setWaError(null); setQrDataUrl(null); setWaStatus('initializing');
-    setActiveSlot(slot); setShowQRModal(true);
+setShowQRModal(true);
     try {
       const res = await fetch(apiUrl(`/api/institutes/${institute.id}/whatsapp-numbers/${slot}/connect`), { method: 'POST' });
       if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error); }
@@ -1957,8 +1957,8 @@ export default function Dashboard() {
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#25D366,#128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📱</div>
-				  
-				  
+	  
+	  
               <div>
                 <h2 className="text-base font-semibold text-gray-900">WhatsApp Numbers</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
