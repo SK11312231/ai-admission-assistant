@@ -70,27 +70,37 @@ async function saveLead(
   instituteId: number,
   studentPhone: string,
   message: string,
-): Promise<void> {
+): Promise<{ skipReply: boolean }> {
   try {
     if (isSpam(studentPhone, message)) {
       console.log(`[WA] Spam detected, skipping: ${studentPhone}`);
-      return;
+      return { skipReply: true };
     }
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS notes TEXT`);
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS follow_up_date TIMESTAMPTZ`);
     await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ DEFAULT NOW()`);
 
     const existing = await pool.query(
-      `SELECT id FROM leads WHERE institute_id = $1 AND student_phone = $2 LIMIT 1`,
+      `SELECT id, status FROM leads WHERE institute_id = $1 AND student_phone = $2 LIMIT 1`,
       [instituteId, studentPhone],
     );
 
     if (existing.rows.length > 0) {
+      const lead = existing.rows[0] as { id: number; status: string };
+      // Lost or converted leads should not receive AI replies
+      if (lead.status === 'lost' || lead.status === 'converted') {
+        console.log(`[WA] Lead ${lead.id} is '${lead.status}' — skipping AI reply.`);
+        await pool.query(
+          `UPDATE leads SET last_activity_at = NOW(), message = $1 WHERE id = $2`,
+          [message, lead.id],
+        );
+        return { skipReply: true };
+      }
       await pool.query(
         `UPDATE leads SET last_activity_at = NOW(), message = $1 WHERE id = $2`,
-        [message, existing.rows[0].id],
+        [message, lead.id],
       );
-      return;
+      return { skipReply: false };
     }
 
     // New lead — name extraction (runs after reply to avoid concurrent API calls)
@@ -136,7 +146,9 @@ async function saveLead(
     })();
   } catch (err) {
     console.error(`[WA] saveLead failed:`, err);
+    return { skipReply: false }; // fail open — don't block reply on DB error
   }
+  return { skipReply: false }; // new lead — reply allowed
 }
 
 // ── Build system prompt (single-call architecture) ───────────────────────────
@@ -527,7 +539,28 @@ export async function initSession(instituteId: string): Promise<void> {
     console.log(`[WA] ===== INCOMING =====`);
     console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
 
-    // Reply FIRST, saveLead AFTER — avoids concurrent API calls
+    // ── Cross-institute loop prevention ──────────────────────────────────
+    // If the sender is another institute in our system, skip AI reply
+    // to prevent infinite AI-to-AI loop. Still save as lead for manual review.
+																		  
+    const crossCheck = await pool.query(
+      `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
+      [phoneClean],
+    );
+    if (crossCheck.rows.length > 0) {
+      console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
+      void saveLead(Number(instituteId), studentPhone, messageText);
+      return;
+    }
+
+																		   
+								 
+
+    // Save lead first — checks status (lost/converted → skip reply)
+    const { skipReply } = await saveLead(Number(instituteId), studentPhone, messageText);
+    if (skipReply) return;
+
+    // AI reply
     try {
       const reply = await getAIReply(Number(instituteId), studentPhone, messageText);
       if (reply) {
@@ -544,7 +577,7 @@ export async function initSession(instituteId: string): Promise<void> {
       console.error(`[WA] Failed to send reply:`, err);
     }
 
-    void saveLead(Number(instituteId), studentPhone, messageText);
+																  
   });
 
   try {
