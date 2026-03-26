@@ -547,11 +547,17 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
     console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
 
     // ── Cross-institute loop prevention ──────────────────────────────────
-    // If the sender is another institute in our system, skip AI reply
-    // to prevent infinite AI-to-AI loop. Still save as lead for manual review.
-					
+    // If the sender's number belongs to ANY institute in our system (either as
+    // their primary number OR as an additional number in institute_whatsapp_numbers),
+    // skip AI reply to prevent infinite AI-to-AI loop.
+    // Still save as lead so the owner can handle it manually.
     const crossCheck = await pool.query(
-      `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
+      `SELECT id FROM institutes
+       WHERE whatsapp_number = $1 AND is_active = TRUE
+       UNION
+       SELECT institute_id AS id FROM institute_whatsapp_numbers
+       WHERE phone_number = $1
+       LIMIT 1`,
       [phoneClean],
     );
     if (crossCheck.rows.length > 0) {
