@@ -521,6 +521,20 @@ export async function initSession(instituteId: string): Promise<void> {
       console.log(`[WA] Blocked: ${phoneClean}`); return;
     }
 
+    // ── Cross-institute loop prevention ────────────────────────────────────
+    // If the sender's number belongs to another institute in our system,
+    // skip the AI reply entirely — replying would cause an infinite AI-to-AI loop.
+    // We still save the lead so the owner can see and handle it manually.
+    const crossCheck = await pool.query(
+      `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
+      [phoneClean],
+    );
+    if (crossCheck.rows.length > 0) {
+      console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
+      void saveLead(Number(instituteId), msg.from.replace('@c.us', '').replace('@lid', ''), msg.body);
+      return;
+    }
+
     const studentPhone = msg.from.replace('@c.us', '').replace('@lid', '');
     const messageText = msg.body;
 

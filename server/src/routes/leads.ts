@@ -72,6 +72,7 @@ function sortByStatus(leads: LeadRow[]): LeadRow[] {
     const ob = STATUS_ORDER[b.status] ?? 99;
     if (oa !== ob) return oa - ob;
     // Within same status: newest first
+
     const aTime = new Date(a.last_activity_at || a.created_at).getTime();
     const bTime = new Date(b.last_activity_at || b.created_at).getTime();
     return bTime - aTime;
@@ -129,8 +130,8 @@ router.get('/:instituteId/usage', async (req: Request, res: Response) => {
 
     res.json({
       plan,
-      ai_responses:     { used: aiUsage.used,  limit: aiUsage.limit },
-      active_leads:     { used: activeLeads,    limit: limits.active_leads },
+      ai_responses: { used: aiUsage.used, limit: aiUsage.limit },
+      active_leads: { used: activeLeads, limit: limits.active_leads },
       whatsapp_numbers: { limit: limits.whatsapp_numbers },
     });
   } catch (err) {
@@ -138,6 +139,34 @@ router.get('/:instituteId/usage', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to fetch usage.' });
   }
 });
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 // ── POST /api/leads — manually add a lead from dashboard ────────────────────
 
@@ -176,6 +205,19 @@ router.post('/', async (req: Request, res: Response) => {
       });
       return;
     }
+
+
+
+
+
+
+
+
+
+
+
+
+
 
     const result = await pool.query(
       `INSERT INTO leads
@@ -334,21 +376,26 @@ router.post('/:id/send-followup', async (req: Request, res: Response) => {
       `- End with an open question to re-engage them\n` +
       `- Plain text only, no markdown`;
 
-    // Generate follow-up message via Groq
+    // Generate follow-up message via GPT-4o-mini (same model as main AI replies)
     const client = getOpenAI();
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'gpt-4o-mini',
       messages: [{ role: 'user', content: prompt }],
       temperature: 0.7,
       max_tokens: 200,
     });
 
-    const followUpMessage = completion.choices[0]?.message?.content?.trim() || 
+    const followUpMessage = completion.choices[0]?.message?.content?.trim() ||
       `Hi! We noticed your enquiry about ${lead.institute_name as string}. We'd love to help you with your admission process. Are you still interested?`;
+
+    // Support both @c.us and @lid number formats
+    const toNumber = (lead.student_phone as string).includes('@')
+      ? lead.student_phone as string
+      : `${lead.student_phone as string}@c.us`;
 
     const sent = await sendMessageToStudent(
       String(lead.institute_id),
-      `${lead.student_phone as string}@c.us`,
+      toNumber,
       followUpMessage,
     );
 
@@ -426,7 +473,7 @@ export async function createLeadFromWhatsApp(
     );
 
     if (existing.rows.length > 0) {
-      // Lead exists — just update last_activity_at (doesn't count toward limit)
+      // Lead exists — just update last_activity_at
       await pool.query(
         `UPDATE leads SET last_activity_at = NOW(), message = $1 WHERE id = $2`,
         [message, existing.rows[0].id],
@@ -441,6 +488,14 @@ export async function createLeadFromWhatsApp(
       console.log(`[Leads] Institute ${instituteId} hit active leads cap (${limitCheck.used}/${limitCheck.limit}) — lead not saved for ${studentPhone}`);
       return; // Silently skip — AI will still reply, just won't save as lead
     }
+
+
+
+
+
+
+
+
 
     // New lead — try to extract name from first message
     const studentName = await extractStudentName(message);
