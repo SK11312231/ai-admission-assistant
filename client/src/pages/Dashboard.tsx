@@ -7,7 +7,7 @@ import { useNavigate } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
-														  
+				
 
 // ── Razorpay global type declaration ─────────────────────────────────────────
 declare global {
@@ -163,7 +163,7 @@ export default function Dashboard() {
     label: string; is_connected: boolean; status: string;
   }>>([]);
   const [waNumbersLoading, setWaNumbersLoading] = useState(false);
-																				   
+					   
   const [addingNumber, setAddingNumber] = useState(false);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -354,8 +354,27 @@ export default function Dashboard() {
     setWaNumbersLoading(true);
     try {
       const res = await fetch(apiUrl(`/api/institutes/${inst.id}/whatsapp-numbers`));
-      if (res.ok) setWaNumbers(await res.json() as typeof waNumbers);
-    } catch { /* silent */ } finally { setWaNumbersLoading(false); }
+      if (res.ok) {
+        setWaNumbers(await res.json() as typeof waNumbers);
+      } else {
+        // Multi-number route not deployed yet — create a synthetic slot 1 from institute data
+        setWaNumbers([{
+          id: 0, slot: 1,
+          phone_number: inst.whatsapp_number || null,
+          label: 'Main Number',
+          is_connected: inst.whatsapp_connected,
+          status: inst.whatsapp_connected ? 'connected' : 'disconnected',
+        }]);
+      }
+    } catch {
+      setWaNumbers([{
+        id: 0, slot: 1,
+        phone_number: inst.whatsapp_number || null,
+        label: 'Main Number',
+        is_connected: inst.whatsapp_connected,
+        status: inst.whatsapp_connected ? 'connected' : 'disconnected',
+      }]);
+    } finally { setWaNumbersLoading(false); }
   };
 
   // Load whatsapp numbers when tab is opened
@@ -367,7 +386,11 @@ export default function Dashboard() {
     stopPolling();
     pollRef.current = setInterval(async () => {
       try {
-        const res = await fetch(apiUrl(`/api/institutes/${inst.id}/whatsapp-numbers/${slot}/status`));
+        // Use slot-specific endpoint if available, fall back to legacy for slot 1
+        const endpoint = slot === 1
+          ? apiUrl(`/api/institutes/${inst.id}/whatsapp-status`)
+          : apiUrl(`/api/institutes/${inst.id}/whatsapp-numbers/${slot}/status`);
+        const res = await fetch(endpoint);
         if (!res.ok) return;
         const data = await res.json() as { status: WAStatus; qr: string | null };
         setWaStatus(data.status);
@@ -391,8 +414,9 @@ export default function Dashboard() {
   const handleConnectWhatsApp = async () => {
     if (!institute) return;
     setWaError(null); setQrDataUrl(null); setWaStatus('initializing'); setShowQRModal(true);
-					 
+	  
     try {
+      // Use legacy endpoint for slot 1 (backward compatible)
       const res = await fetch(apiUrl(`/api/institutes/${institute.id}/connect-whatsapp`), { method: 'POST' });
       if (!res.ok) { const d = await res.json() as { error?: string }; throw new Error(d.error); }
       startPolling(institute, 1);
@@ -1957,8 +1981,8 @@ setShowQRModal(true);
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#25D366,#128C7E)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📱</div>
-	  
-	  
+   
+   
               <div>
                 <h2 className="text-base font-semibold text-gray-900">WhatsApp Numbers</h2>
                 <p className="text-xs text-gray-500 mt-0.5">
