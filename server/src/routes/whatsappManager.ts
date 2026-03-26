@@ -303,6 +303,20 @@ export async function getAIReply(
 ): Promise<string | null> {
   console.log(`[WA] getAIReply START — institute ${instituteId}`);
   try {
+    // ── Cross-institute guard (defense in depth) ────────────────────────────
+    // Even if called directly, never reply to another institute's number
+    const crossGuard = await pool.query(
+      `SELECT 1 FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE
+       UNION
+       SELECT 1 FROM institute_whatsapp_numbers WHERE phone_number = $1
+       LIMIT 1`,
+      [studentPhone.replace(/[\s\-\+]/g, '')],
+    );
+    if (crossGuard.rows.length > 0) {
+      console.log(`[WA] getAIReply blocked for cross-institute number ${studentPhone}`);
+      return null;
+    }
+
     // ── Plan limit check ──────────────────────────────────────────────────────
     const plan = await getInstitutePlan(instituteId);
     const limitCheck = await checkAndIncrementAIResponse(instituteId, plan);
@@ -543,28 +557,32 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
     const studentPhone = msg.from.replace('@c.us', '').replace('@lid', '');
     const messageText = msg.body;
 
-    console.log(`[WA] ===== INCOMING =====`);
-    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
+											 
+																								 
 
     // ── Cross-institute loop prevention ──────────────────────────────────
-    // If the sender's number belongs to ANY institute in our system (either as
-    // their primary number OR as an additional number in institute_whatsapp_numbers),
-    // skip AI reply to prevent infinite AI-to-AI loop.
-    // Still save as lead so the owner can handle it manually.
+																			   
+    // Check BOTH tables: primary whatsapp_number column AND institute_whatsapp_numbers
+    // (multi-number support). If sender belongs to any institute → no reply of any kind.
+															  
     const crossCheck = await pool.query(
-      `SELECT id FROM institutes
+      `SELECT 1 FROM institutes
        WHERE whatsapp_number = $1 AND is_active = TRUE
        UNION
-       SELECT institute_id AS id FROM institute_whatsapp_numbers
+       SELECT 1 FROM institute_whatsapp_numbers
        WHERE phone_number = $1
        LIMIT 1`,
       [phoneClean],
     );
     if (crossCheck.rows.length > 0) {
-      console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
+      console.log(`[WA] Cross-institute message from ${phoneClean} — no reply sent (loop prevention).`);
+      // Still save as lead so owner sees it, but absolutely no reply of any kind
       void saveLead(Number(instituteId), studentPhone, messageText);
       return;
     }
+
+    console.log(`[WA] ===== INCOMING =====`);
+    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
 
 					 
 		 
