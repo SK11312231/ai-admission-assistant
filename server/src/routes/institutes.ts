@@ -1492,6 +1492,7 @@ router.post('/:id/clear-all-sessions', async (req, res) => {
 });
 
 // GET /api/institutes/:id/profile-completeness
+
 // Returns a completeness score for the institute's AI knowledge base.
 router.get('/:id/profile-completeness', async (req: Request, res: Response) => {
   const instituteId = Number(req.params.id);
