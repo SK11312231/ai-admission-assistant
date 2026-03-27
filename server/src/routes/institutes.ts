@@ -10,39 +10,39 @@ import { getLimits, getInstitutePlan } from './planLimits';
 // PHONE VERIFICATION — Fast2SMS commented until DLT registration is complete
 // async function sendOTPViaSMS(toPhone: string, otp: string): Promise<boolean> {
 //   const apiKey = process.env.FAST2SMS_API_KEY;
-				
-													
-				 
-   
-																		   
-																				
-							
-																	
-				 
-   
-	   
-																	
-					 
-				
-								
-										   
-		
-							
-					 
-							  
-					   
-		 
-	   
-																			 
-					   
-																	   
-				   
+	
+			 
 	 
+   
+					 
+					
+	   
+				 
+	 
+   
+	
+				 
+	  
+	
+		
+			 
+  
+	   
+	  
+		 
+		
+   
+	
+					
+		
+					
+	   
+  
 //   ... (send OTP via Fast2SMS bulkV2 OTP route)
 // }
-				 
-														 
-				 
+	 
+			   
+	 
    
  
 
@@ -63,6 +63,10 @@ interface InstituteRow {
   password_hash: string;
   created_at: string;
   whatsapp_connected: boolean;
+  // From subscriptions JOIN
+  subscription_billing_cycle: string | null;
+  subscription_expires_at: string | null;
+  subscription_status: string | null;
 }
 
 const PBKDF2_ITERATIONS = 100_000;
@@ -264,33 +268,33 @@ router.post('/:id/send-phone-otp', (_req: Request, res: Response) => {
   // Phone verification via SMS is pending DLT registration
   // Uncomment the full implementation once FAST2SMS_API_KEY and DLT template are ready
   res.status(503).json({ error: 'Phone verification coming soon. DLT registration in progress.' });
-																										
-	  
-																									
-																				   
-																							 
+						  
+   
+						 
+					   
+						
 
-																	   
-															 
-					 
-																				   
-							
-	  
-
-							
-																
+					
 				
-							
-																					 
-		 
-			 
-	 
+	  
+					   
+	   
+   
 
-																							 
-											   
+	   
+				
+	
+	   
+					  
+   
+	
+  
+
+						
+			  
+	 
+			
 				 
-										  
-														   
    
 });
 
@@ -389,7 +393,15 @@ router.post('/login', async (req: Request, res: Response) => {
 
   try {
     const result = await pool.query(
-      'SELECT * FROM institutes WHERE email = $1 AND is_active = TRUE',
+      `SELECT i.*,
+              s.billing_cycle        AS subscription_billing_cycle,
+              s.expires_at           AS subscription_expires_at,
+              s.status               AS subscription_status
+       FROM institutes i
+       LEFT JOIN subscriptions s ON s.institute_id = i.id
+       WHERE i.email = $1 AND i.is_active = TRUE
+       ORDER BY s.expires_at DESC NULLS LAST
+       LIMIT 1`,
       [email.trim().toLowerCase()]
     );
     const institute = result.rows[0] as InstituteRow | undefined;
@@ -418,6 +430,8 @@ router.post('/login', async (req: Request, res: Response) => {
           phone_verified: institute.phone_verified ?? false,
           whatsapp_connected: false,
           created_at: institute.created_at,
+          subscription_billing_cycle: null,
+          subscription_expires_at: null,
         },
       });
       return;
@@ -437,6 +451,8 @@ router.post('/login', async (req: Request, res: Response) => {
       phone_verified: institute.phone_verified ?? false,
       whatsapp_connected: institute.whatsapp_connected ?? false,
       created_at: institute.created_at,
+      subscription_billing_cycle: institute.subscription_billing_cycle ?? null,
+      subscription_expires_at: institute.subscription_expires_at ?? null,
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -1157,7 +1173,6 @@ router.post('/:id/change-password', async (req: Request, res: Response) => {
    
    
 
-
 										 
 			  
 					   
@@ -1303,6 +1318,155 @@ router.post('/:id/change-password', async (req: Request, res: Response) => {
 	 
 			 
 				  
+   
+   
+
+
+		   
+	 
+		
+
+	  
+	 
+   
+	
+ 
+
+	  
+
+	
+	   
+
+ 
+   
+	  
+	  
+	 
+	
+	 
+   
+		 
+	 
+  
+  
+	  
+	 
+   
+   
+
+			
+	
+
+	   
+	 
+		
+	 
+	  
+   
+ 
+   
+	
+	
+   
+  
+  
+	
+	  
+   
+   
+
+		  
+
+	 
+	 
+ 
+   
+	  
+   
+	   
+  
+	 
+   
+   
+
+		  
+
+		
+	 
+	  
+   
+	
+   
+ 
+ 
+   
+   
+	 
+	   
+	   
+	
+ 
+  
+   
+	 
+  
+  
+   
+  
+  
+	 
+	   
+   
+   
+
+		   
+
+	  
+	 
+ 
+   
+	   
+	 
+   
+  
+	
+  
+	 
+ 
+  
+	  
+   
+   
+
+			
+
+	   
+	 
+	
+	 
+ 
+	
+	   
+   
+  
+	   
+   
+ 
+   
+		
+   
+	   
+		
+	
+	 
+  
+	 
+	   
+	  
+  
+  
+	
+	  
    
    
 

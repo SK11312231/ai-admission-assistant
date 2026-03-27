@@ -51,6 +51,8 @@ interface Institute {
   whatsapp_waba_id?: string | null;
   whatsapp_phone_number_id?: string | null;
   created_at: string;
+  subscription_billing_cycle?: string | null;
+  subscription_expires_at?: string | null;
 }
 
 interface Lead {
@@ -93,7 +95,7 @@ interface PeakHour { hour: number; label: string; count: number; }
 interface StatusBreakdown { name: string; value: number; color: string; }
 
 type WAStatus = 'idle' | 'initializing' | 'qr' | 'connected' | 'disconnected';
-type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training' | 'premium' | 'whatsapp';
+type Tab = 'leads' | 'analytics' | 'profile' | 'blocklist' | 'widget' | 'training' | 'premium' | 'whatsapp' | 'broadcast';
 
 // ── Trial helper ──────────────────────────────────────────────────────────────
 
@@ -226,6 +228,7 @@ export default function Dashboard() {
   const [expandedLead, setExpandedLead] = useState<number | null>(null);
   const [editingNotes, setEditingNotes] = useState<Record<number, string>>({});
   const [savingNotes, setSavingNotes] = useState<Record<number, boolean>>({});
+  const [savedNotes, setSavedNotes] = useState<Record<number, boolean>>({});
   const [savingFollowUp, setSavingFollowUp] = useState<Record<number, boolean>>({});
   const [editingFollowUp, setEditingFollowUp] = useState<Record<number, string>>({});
   const [sendingFollowUp, setSendingFollowUp] = useState<Record<number, boolean>>({});
@@ -256,6 +259,19 @@ export default function Dashboard() {
 
   // Widget tab
   const [widgetCopied, setWidgetCopied] = useState(false);
+
+  // Broadcast tab
+  const [broadcasts, setBroadcasts] = useState<Array<{
+    id: number; name: string; message: string; status: string;
+    target_filter: string; total_count: number; sent_count: number;
+    failed_count: number; created_at: string; completed_at: string | null;
+  }>>([]);
+  const [broadcastsLoading, setBroadcastsLoading] = useState(false);
+  const [broadcastForm, setBroadcastForm] = useState({ name: '', message: '', target_filter: 'all' });
+  const [broadcastSending, setBroadcastSending] = useState(false);
+  const [broadcastMsg, setBroadcastMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [broadcastPreviewCount, setBroadcastPreviewCount] = useState<number | null>(null);
+  const [broadcastPollTimer, setBroadcastPollTimer] = useState<ReturnType<typeof setInterval> | null>(null);
 
   // ── Initial load ────────────────────────────────────────────────────────────
   useEffect(() => {
@@ -680,6 +696,83 @@ setShowQRModal(true);
     finally { setPwSaving(false); }
   };
 
+  // ── Broadcast handlers ───────────────────────────────────────────────────────
+  const loadBroadcasts = async () => {
+    if (!institute) return;
+    setBroadcastsLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/broadcast/${institute.id}`));
+      if (res.ok) setBroadcasts(await res.json() as typeof broadcasts);
+    } catch { /* silent */ }
+    finally { setBroadcastsLoading(false); }
+  };
+
+  const fetchBroadcastPreview = async (filter: string) => {
+    if (!institute) return;
+    setBroadcastPreviewCount(null);
+    try {
+      const res = await fetch(apiUrl(`/api/broadcast/${institute.id}/preview?filter=${filter}`));
+      if (res.ok) {
+        const data = await res.json() as { count: number };
+        setBroadcastPreviewCount(data.count);
+      }
+    } catch { /* silent */ }
+  };
+
+  const handleSendBroadcast = async () => {
+    if (!institute) return;
+    if (!broadcastForm.name.trim()) { setBroadcastMsg({ type: 'error', text: 'Please enter a broadcast name.' }); return; }
+    if (!broadcastForm.message.trim()) { setBroadcastMsg({ type: 'error', text: 'Please enter a message.' }); return; }
+    if (broadcastPreviewCount === 0) { setBroadcastMsg({ type: 'error', text: 'No leads match this filter.' }); return; }
+    setBroadcastSending(true); setBroadcastMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/broadcast/${institute.id}`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(broadcastForm),
+      });
+      const data = await res.json() as { id?: number; error?: string; total_count?: number };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to start broadcast.');
+      setBroadcastMsg({ type: 'success', text: `✅ Broadcast started! Sending to ${data.total_count ?? 0} leads at 1 message every 3 seconds.` });
+      setBroadcastForm({ name: '', message: '', target_filter: 'all' });
+      setBroadcastPreviewCount(null);
+      // Poll progress every 5s
+      if (data.id) {
+        const timer = setInterval(async () => {
+          try {
+            const pRes = await fetch(apiUrl(`/api/broadcast/${institute.id}/${data.id}/status`));
+            if (pRes.ok) {
+              const pData = await pRes.json() as { status: string; sent_count: number; total_count: number };
+              setBroadcasts(prev => prev.map(b => b.id === data.id ? { ...b, ...pData } : b));
+              if (pData.status === 'completed' || pData.status === 'failed') {
+                clearInterval(timer); setBroadcastPollTimer(null);
+              }
+            }
+          } catch { /* silent */ }
+        }, 5000);
+        setBroadcastPollTimer(timer);
+        void loadBroadcasts();
+      }
+    } catch (err) {
+      setBroadcastMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed to send.' });
+    } finally { setBroadcastSending(false); }
+  };
+
+  const handleDeleteBroadcast = async (broadcastId: number) => {
+    if (!institute || !window.confirm('Delete this broadcast from history?')) return;
+    try {
+      await fetch(apiUrl(`/api/broadcast/${institute.id}/${broadcastId}`), { method: 'DELETE' });
+      setBroadcasts(prev => prev.filter(b => b.id !== broadcastId));
+    } catch { /* silent */ }
+  };
+
+  // Cleanup broadcast poll on unmount
+  useEffect(() => () => { if (broadcastPollTimer) clearInterval(broadcastPollTimer); }, [broadcastPollTimer]);
+
+  // Load broadcasts when tab opens
+  useEffect(() => {
+    if (activeTab === 'broadcast' && institute) void loadBroadcasts();
+  }, [activeTab, institute]); // eslint-disable-line react-hooks/exhaustive-deps
+
   // ── Lead actions ────────────────────────────────────────────────────────────
   const updateStatus = async (leadId: number, status: string) => {
     await fetch(apiUrl(`/api/leads/${leadId}/status`), {
@@ -699,6 +792,9 @@ setShowQRModal(true);
     setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, notes } : l));
     setEditingNotes(prev => { const n = { ...prev }; delete n[lead.id]; return n; });
     setSavingNotes(prev => ({ ...prev, [lead.id]: false }));
+    // Show success tick for 2s
+    setSavedNotes(prev => ({ ...prev, [lead.id]: true }));
+    setTimeout(() => setSavedNotes(prev => ({ ...prev, [lead.id]: false })), 2000);
   };
 
   const saveFollowUp = async (lead: Lead) => {
@@ -860,13 +956,20 @@ setShowQRModal(true);
               }),
             });
             const verifyData = await verifyRes.json() as {
-              success: boolean; plan: string; expires_at: string; error?: string;
+              success: boolean; plan: string; billing_cycle?: string; expires_at: string; error?: string;
             };
             if (!verifyRes.ok) throw new Error(verifyData.error ?? 'Verification failed.');
 
-            // Update local institute state
+            // Update local institute state with subscription info
             const isPremiumPlan = ['growth', 'pro'].includes(verifyData.plan);
-            const updated = { ...institute, plan: verifyData.plan, is_paid: true, is_premium_accessible: isPremiumPlan };
+            const updated = {
+              ...institute,
+              plan: verifyData.plan,
+              is_paid: true,
+              is_premium_accessible: isPremiumPlan,
+              subscription_billing_cycle: verifyData.billing_cycle ?? null,
+              subscription_expires_at: verifyData.expires_at ?? null,
+            };
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
             setUpgradeSuccess(true);
@@ -938,13 +1041,14 @@ setShowQRModal(true);
     { id: 'analytics', label: 'Analytics', emoji: '📊' },
     { id: 'widget', label: 'Chat Widget', emoji: '💬' },
     { id: 'training', label: 'AI Training', emoji: '🧠' },
+    { id: 'broadcast', label: 'Bulk Broadcast', emoji: '📣' },
   ];
 
   // Page title for topbar
   const pageTitles: Record<Tab, string> = {
     leads: 'Leads', analytics: 'Analytics', profile: 'Institute Profile',
     blocklist: 'Blocklist', widget: 'Chat Widget', training: 'AI Training', premium: 'Premium Features',
-    whatsapp: 'WhatsApp Connect',
+    whatsapp: 'WhatsApp Connect', broadcast: 'Bulk Broadcast',
   };
 
   return (
@@ -1384,6 +1488,38 @@ setShowQRModal(true);
             </div>
           )}
 
+          {/* ── Subscription Expiry Banner ────────────────────────────────── */}
+          {institute && institute.subscription_expires_at && institute.plan !== 'starter' && (() => {
+            const expiresAt = new Date(institute.subscription_expires_at);
+            const now = new Date();
+            const daysLeft = Math.ceil((expiresAt.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+            const isExpired = daysLeft <= 0;
+            const isCritical = daysLeft <= 7 && daysLeft > 0;
+            const isWarning = daysLeft <= 30 && daysLeft > 7;
+            if (!isExpired && !isCritical && !isWarning) return null;
+            const bg = isExpired || isCritical ? '#fef2f2' : '#fffbeb';
+            const border = isExpired || isCritical ? '1px solid #fecaca' : '1px solid #fde68a';
+            const color = isExpired || isCritical ? '#991b1b' : '#92400e';
+            return (
+              <div style={{ background: bg, border, borderRadius: '12px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <span style={{ fontSize: '18px' }}>{isExpired ? '🔴' : isCritical ? '🔴' : '⚠️'}</span>
+                  <p style={{ fontSize: '13px', fontWeight: 600, color, margin: 0 }}>
+                    {isExpired
+                      ? `Your ${institute.plan} plan has expired. Renew to keep AI replies active.`
+                      : `Your ${institute.plan} plan expires in ${daysLeft} day${daysLeft === 1 ? '' : 's'} — ${expiresAt.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}`
+                    }
+                  </p>
+                </div>
+                <button
+                  onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+                  style={{ flexShrink: 0, fontSize: '12px', fontWeight: 600, background: isExpired || isCritical ? '#dc2626' : '#d97706', color: '#fff', border: 'none', borderRadius: '8px', padding: '6px 14px', cursor: 'pointer', whiteSpace: 'nowrap' }}>
+                  {isExpired ? 'Renew Now' : 'Renew Plan'}
+                </button>
+              </div>
+            );
+          })()}
+
           {/* ── Profile Completeness Banner ───────────────────────────────── */}
           {profileCompleteness && !profileCompleteness.complete && (
             <div style={{
@@ -1592,12 +1728,14 @@ setShowQRModal(true);
                                 placeholder="Add notes about this lead…"
                                 className="w-full text-sm border border-gray-300 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none bg-white"
                               />
-                              <button
-                                onClick={() => void saveNotes(lead)}
-                                disabled={savingNotes[lead.id]}
-                                className="mt-2 text-xs bg-indigo-600 text-white px-3 py-1.5 rounded-lg hover:bg-indigo-700 disabled:opacity-50">
-                                {savingNotes[lead.id] ? 'Saving…' : 'Save Notes'}
-                              </button>
+                              <div className="mt-2 flex items-center gap-2">
+                                <button
+                                  onClick={() => void saveNotes(lead)}
+                                  disabled={savingNotes[lead.id]}
+                                  className={`text-xs px-3 py-1.5 rounded-lg disabled:opacity-50 transition-colors font-medium ${savedNotes[lead.id] ? 'bg-green-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'}`}>
+                                  {savingNotes[lead.id] ? 'Saving…' : savedNotes[lead.id] ? '✅ Saved!' : 'Save Notes'}
+                                </button>
+                              </div>
                             </div>
                           )}
 
@@ -2211,6 +2349,47 @@ setShowQRModal(true);
                   </div>
                 </div>
 
+                {/* Subscription Info Card */}
+                {institute.plan !== 'starter' && (
+                  <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4">
+                    <p className="text-xs font-bold text-indigo-700 uppercase tracking-widest mb-3">Subscription</p>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">Plan</p>
+                        <p className="font-semibold text-gray-900 capitalize">{institute.plan}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">Billing</p>
+                        <p className="font-semibold text-gray-900 capitalize">
+                          {institute.subscription_billing_cycle ?? '—'}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">Status</p>
+                        <span className={`inline-flex items-center gap-1 text-xs font-semibold px-2 py-0.5 rounded-full ${institute.is_paid ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-600'}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${institute.is_paid ? 'bg-green-500' : 'bg-red-500'}`} />
+                          {institute.is_paid ? 'Active' : 'Expired'}
+                        </span>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500 mb-0.5">{institute.is_paid ? 'Renews / Expires' : 'Expired on'}</p>
+                        <p className="font-semibold text-gray-900">
+                          {institute.subscription_expires_at
+                            ? new Date(institute.subscription_expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })
+                            : '—'}
+                        </p>
+                      </div>
+                    </div>
+                    {!institute.is_paid && (
+                      <button
+                        onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+                        className="mt-3 w-full bg-indigo-600 text-white text-xs font-semibold py-2 rounded-lg hover:bg-indigo-700 transition-colors">
+                        🔄 Renew Plan →
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className="flex justify-end pt-2">
                   <button onClick={() => void handleSaveBasicInfo()} disabled={basicSaving}
                     className="bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
@@ -2518,6 +2697,180 @@ setShowQRModal(true);
           </div>
         ) : (
           <TrainingSection instituteId={institute.id} />
+        )
+      )}
+
+      {/* ── Broadcast Tab ────────────────────────────────────────────────────── */}
+      {activeTab === 'broadcast' && institute && (
+        !premiumUnlocked || institute.plan !== 'pro' ? (
+          <div className="flex flex-col items-center justify-center py-24 px-4 text-center">
+            <div className="w-16 h-16 bg-indigo-50 rounded-2xl flex items-center justify-center text-3xl mb-5">📣</div>
+            <span className="inline-block bg-indigo-100 text-indigo-700 text-xs font-bold px-3 py-1 rounded-full mb-3 uppercase tracking-widest">Pro Plan Feature</span>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Bulk Broadcast Messaging</h3>
+            <p className="text-gray-500 text-sm max-w-sm mb-6">
+              Send a personalised WhatsApp message to hundreds of leads at once — filtered by status. Perfect for batch announcements, fee reminders, and re-engagement.
+            </p>
+            <div className="bg-gray-50 border border-gray-200 rounded-xl p-5 mb-6 text-left w-full max-w-sm">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-widest mb-3">What you can do</p>
+              {['Send to all leads or filter by status', 'Staggered delivery (3s apart) to stay safe', 'Real-time progress tracking', 'Full broadcast history'].map(f => (
+                <div key={f} className="flex items-center gap-2 mb-2">
+                  <span className="text-indigo-500 font-bold text-xs">✓</span>
+                  <span className="text-sm text-gray-700">{f}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => { setUpgradeError(null); setUpgradeSuccess(false); setShowUpgradeModal(true); }}
+              className="bg-indigo-600 text-white font-semibold px-6 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm">
+              ⬆️ Upgrade to Pro — ₹8,999/month →
+            </button>
+          </div>
+        ) : (
+          <div>
+            <div className="flex items-center gap-3 mb-6">
+              <div style={{ width: 36, height: 36, borderRadius: 10, background: 'linear-gradient(135deg,#7c3aed,#4f46e5)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18 }}>📣</div>
+              <div>
+                <h2 className="text-base font-semibold text-gray-900">Bulk Broadcast</h2>
+                <p className="text-xs text-gray-500 mt-0.5">Send a WhatsApp message to multiple leads at once. Messages are sent 3 seconds apart.</p>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Compose form */}
+              <div className="bg-white border border-gray-200 rounded-2xl p-5">
+                <h3 className="text-sm font-bold text-gray-900 mb-4">New Broadcast</h3>
+
+                {broadcastMsg && (
+                  <div className={`text-sm rounded-xl px-4 py-3 mb-4 ${broadcastMsg.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-600'}`}>
+                    {broadcastMsg.text}
+                  </div>
+                )}
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">Broadcast Name <span className="text-red-400">*</span></label>
+                    <input type="text" value={broadcastForm.name} placeholder="e.g. April Admission Reminder"
+                      onChange={e => setBroadcastForm(f => ({ ...f, name: e.target.value }))}
+                      className="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">Target Audience</label>
+                    <select value={broadcastForm.target_filter}
+                      onChange={e => {
+                        setBroadcastForm(f => ({ ...f, target_filter: e.target.value }));
+                        void fetchBroadcastPreview(e.target.value);
+                      }}
+                      className="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500 bg-white">
+                      <option value="all">All active leads (excludes lost)</option>
+                      <option value="new">New leads only</option>
+                      <option value="contacted">Contacted leads only</option>
+                      <option value="converted">Converted leads only</option>
+                    </select>
+                    {broadcastPreviewCount !== null && (
+                      <p className="text-xs text-indigo-600 mt-1 font-medium">
+                        📊 {broadcastPreviewCount} lead{broadcastPreviewCount !== 1 ? 's' : ''} will receive this message
+                        {broadcastPreviewCount > 0 && ` · Est. time: ~${Math.ceil(broadcastPreviewCount * 3 / 60)} min`}
+                      </p>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-gray-600 mb-1.5">
+                      Message <span className="text-red-400">*</span>
+                      <span className="text-gray-400 font-normal ml-2">{broadcastForm.message.length}/1000</span>
+                    </label>
+                    <textarea value={broadcastForm.message} rows={6}
+                      placeholder="Hi! We wanted to share an update about our upcoming batch starting April 1st. Seats are limited — reply to know more or call us at 98765-43210."
+                      onChange={e => setBroadcastForm(f => ({ ...f, message: e.target.value.slice(0, 1000) }))}
+                      className="w-full text-sm border border-gray-300 rounded-xl px-3 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" />
+                    <p className="text-xs text-gray-400 mt-1">Keep it short and personal. Long messages have lower read rates.</p>
+                  </div>
+
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3">
+                    <p className="text-xs text-amber-700 font-medium">⚠️ Broadcast responsibly</p>
+                    <p className="text-xs text-amber-600 mt-0.5">Only send to leads who expect to hear from you. Spam reports can get your WhatsApp number flagged.</p>
+                  </div>
+
+                  <button onClick={() => void handleSendBroadcast()} disabled={broadcastSending || !broadcastForm.name || !broadcastForm.message}
+                    className="w-full bg-indigo-600 text-white font-semibold py-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm flex items-center justify-center gap-2">
+                    {broadcastSending
+                      ? <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Starting…</>
+                      : '📣 Send Broadcast'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Broadcast history */}
+              <div>
+                <h3 className="text-sm font-bold text-gray-900 mb-4">Broadcast History</h3>
+                {broadcastsLoading ? (
+                  <div className="text-center py-12"><div className="w-7 h-7 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-2" /><p className="text-xs text-gray-400">Loading…</p></div>
+                ) : broadcasts.length === 0 ? (
+                  <div className="bg-gray-50 border border-gray-200 rounded-2xl p-8 text-center">
+                    <div className="text-3xl mb-2">📭</div>
+                    <p className="text-sm text-gray-500">No broadcasts yet. Send your first one!</p>
+                  </div>
+                ) : (
+                  <div className="space-y-3">
+                    {broadcasts.map(b => {
+                      const isRunning = b.status === 'sending';
+                      const progress = b.total_count > 0 ? Math.round(((b.sent_count + b.failed_count) / b.total_count) * 100) : 0;
+                      return (
+                        <div key={b.id} className="bg-white border border-gray-200 rounded-2xl p-4">
+                          <div className="flex items-start justify-between gap-2 mb-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate">{b.name}</p>
+                              <p className="text-xs text-gray-400 mt-0.5">
+                                {new Date(b.created_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                                {' · '}
+                                {b.target_filter === 'all' ? 'All active' : b.target_filter} leads
+                              </p>
+                            </div>
+                            <div className="flex items-center gap-2 flex-shrink-0">
+                              <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${
+                                b.status === 'completed' ? 'bg-green-100 text-green-700' :
+                                b.status === 'sending' ? 'bg-blue-100 text-blue-700' :
+                                b.status === 'failed' ? 'bg-red-100 text-red-600' :
+                                'bg-gray-100 text-gray-500'
+                              }`}>
+                                {b.status === 'sending' ? '⏳ Sending' :
+                                 b.status === 'completed' ? '✅ Done' :
+                                 b.status === 'failed' ? '❌ Failed' : b.status}
+                              </span>
+                              {b.status !== 'sending' && (
+                                <button onClick={() => void handleDeleteBroadcast(b.id)}
+                                  className="text-gray-300 hover:text-red-400 transition-colors text-sm">✕</button>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Progress bar for running broadcasts */}
+                          {isRunning && (
+                            <div className="mb-2">
+                              <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                <span>Sending…</span>
+                                <span>{b.sent_count + b.failed_count}/{b.total_count}</span>
+                              </div>
+                              <div className="h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                                <div className="h-full bg-indigo-500 rounded-full transition-all" style={{ width: `${progress}%` }} />
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Stats */}
+                          <div className="flex gap-3 text-xs text-gray-500">
+                            <span>📤 {b.sent_count} sent</span>
+                            {b.failed_count > 0 && <span className="text-red-400">❌ {b.failed_count} failed</span>}
+                            <span className="text-gray-400">/ {b.total_count} total</span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         )
       )}
 
