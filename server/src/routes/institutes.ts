@@ -2,10 +2,49 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import qrcode from 'qrcode';
 import pool from '../db';
-import { initSession, getSessionState, getAllSessionStates, disconnectSession, sendOTPViaWhatsApp } from './whatsappManager';
+import { initSession, getSessionState, getAllSessionStates, disconnectSession } from './whatsappManager';
 import { scrapeAndEnrich, getInstituteDetails, scoreProfileCompleteness } from './instituteEnrichment';
 import { sendWelcomeEmail, sendPasswordResetEmail, sendEmailVerificationEmail } from './emailService';
 import { getLimits, getInstitutePlan } from './planLimits';
+
+// ── Fast2SMS — Send OTP via SMS (India) ───────────────────────────────────────
+async function sendOTPViaSMS(toPhone: string, otp: string): Promise<boolean> {
+  const apiKey = process.env.FAST2SMS_API_KEY;
+  if (!apiKey) {
+    console.error('[SMS] FAST2SMS_API_KEY not set');
+    return false;
+  }
+  // Strip country code — Fast2SMS expects 10-digit Indian mobile numbers
+  const phone = toPhone.replace(/^\+?91/, '').replace(/[\s\-]/g, '').slice(-10);
+  if (phone.length !== 10) {
+    console.error(`[SMS] Invalid phone number for SMS: ${toPhone}`);
+    return false;
+  }
+  try {
+    const res = await fetch('https://www.fast2sms.com/dev/bulkV2', {
+      method: 'POST',
+      headers: {
+        'authorization': apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        route: 'otp',
+        variables_values: otp,
+        numbers: phone,
+      }),
+    });
+    const data = await res.json() as { return: boolean; message?: string[] };
+    if (!data.return) {
+      console.error('[SMS] Fast2SMS error:', data.message?.join(', '));
+      return false;
+    }
+    console.log(`[SMS] OTP sent to ${phone} via Fast2SMS`);
+    return true;
+  } catch (err) {
+    console.error('[SMS] Fast2SMS request failed:', err);
+    return false;
+  }
+}
 
 const router = Router();
 
@@ -229,17 +268,23 @@ router.post('/:id/send-phone-otp', async (req: Request, res: Response) => {
     const inst = result.rows[0] as { whatsapp_number: string; phone_verified: boolean } | undefined;
     if (!inst) { res.status(404).json({ error: 'Institute not found.' }); return; }
     if (inst.phone_verified) { res.json({ success: true, already_verified: true }); return; }
+
     const otp = Math.floor(100000 + Math.random() * 900000).toString();
     const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
     await pool.query(
       `UPDATE institutes SET phone_otp = $1, phone_otp_expires = $2 WHERE id = $3`,
       [otp, otpExpires, id],
     );
-    const sent = await sendOTPViaWhatsApp(inst.whatsapp_number, otp);
+
+    // Send via Fast2SMS SMS
+    const sent = await sendOTPViaSMS(inst.whatsapp_number, otp);
     if (!sent) {
-      res.status(503).json({ error: 'Could not send OTP via WhatsApp. Please ensure at least one WhatsApp session is active on the platform.' });
+      res.status(503).json({
+        error: 'Could not send OTP via SMS. Please check your number and try again.',
+      });
       return;
     }
+
     const masked = inst.whatsapp_number.slice(-4).padStart(inst.whatsapp_number.length, '*');
     res.json({ success: true, phone: masked });
   } catch (err) {
@@ -962,6 +1007,155 @@ router.post('/:id/change-password', async (req: Request, res: Response) => {
     res.status(500).json({ error: 'Failed to change password.' });
   }
 });
+
+
+																																								 
+													 
+																					  
+
+																		
+								   
+												
+													
+	
+
+																								
+
+										   
+																								 
+
+	   
+									
+																			  
+																		
+																				
+												 
+														   
+	  
+																									  
+																	
+							 
+				 
+												   
+																	
+   
+   
+
+																																						 
+							
+
+																			
+								   
+																					  
+															  
+																				 
+   
+	   
+					 
+																
+										   
+	  
+								
+				 
+													   
+																		
+   
+   
+
+																																							 
+
+																		  
+								   
+	   
+									
+																  
+	  
+																		 
+				 
+																	   
+   
+   
+
+																																  
+
+																					  
+								   
+																					   
+							  
+								  
+									
+	
+	   
+					 
+						
+														   
+																   
+																	  
+					  
+	   
+								
+									
+									  
+		   
+		
+	  
+								
+				 
+														   
+																				  
+   
+   
+
+																																	  
+
+																					
+								   
+	   
+									
+																		 
+											
+	  
+								
+							
+								
+								   
+	   
+				 
+																				 
+   
+   
+
+																																						 
+
+																			
+								   
+														  
+													 
+	
+										   
+																						   
+   
+								
+																						   
+   
+	   
+									
+																					  
+	  
+																		 
+																				   
+																
+																				
+	 
+											   
+																							  
+																  
+								
+				 
+												 
+																  
+   
+   
 
 // DELETE /api/institutes/:id/disconnect-whatsapp
 router.delete('/:id/disconnect-whatsapp', async (req: Request, res: Response) => {
