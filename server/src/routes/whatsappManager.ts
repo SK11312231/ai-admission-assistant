@@ -70,6 +70,7 @@ async function saveLead(
   instituteId: number,
   studentPhone: string,
   message: string,
+  notifyName?: string | null,
 ): Promise<{ skipReply: boolean }> {
   try {
     if (isSpam(studentPhone, message)) {
@@ -103,22 +104,13 @@ async function saveLead(
       return { skipReply: false };
     }
 
-    // New lead — name extraction (runs after reply to avoid concurrent API calls)
-    let studentName: string | null = null;
-    try {
-      const client = getOpenAI();
-      const completion = await client.chat.completions.create({
-        model: 'gpt-4o-mini',
-        messages: [
-          { role: 'system', content: 'Extract the student name from the message. Reply with ONLY the name, or NULL if not found.' },
-          { role: 'user', content: message },
-        ],
-        temperature: 0,
-        max_tokens: 20,
-      });
-      const raw = completion.choices[0]?.message?.content?.trim() ?? 'NULL';
-      studentName = raw === 'NULL' || raw === '' ? null : raw;
-    } catch { /* non-fatal */ }
+    // Use WhatsApp notifyName if available — free, instant, no API call needed.
+    // If not available, store as null. Institute owner can edit the name manually.
+    const studentName: string | null =
+      (notifyName && notifyName.trim() && notifyName.trim().toLowerCase() !== 'null')
+        ? notifyName.trim()
+        : null;
+    if (studentName) console.log(`[WA] notifyName: ${studentName}`);
 
     await pool.query(
       `INSERT INTO leads (institute_id, student_name, student_phone, message, status, last_activity_at)
@@ -303,20 +295,6 @@ export async function getAIReply(
 ): Promise<string | null> {
   console.log(`[WA] getAIReply START — institute ${instituteId}`);
   try {
-																																		   
-																		 
-										
-																			   
-			
-																	   
-				
-											  
-	  
-									 
-																						
-				  
-	 
-
     // ── Plan limit check ──────────────────────────────────────────────────────
     const plan = await getInstitutePlan(instituteId);
     const limitCheck = await checkAndIncrementAIResponse(instituteId, plan);
@@ -580,39 +558,31 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
 
     const studentPhone = msg.from.replace('@c.us', '').replace('@lid', '');
     const messageText = msg.body;
+    // notifyName = WhatsApp display name set on sender's device (not always available)
+    const notifyName = (msg as unknown as { _data?: { notifyName?: string } })._data?.notifyName ?? null;
 
     console.log(`[WA] ===== INCOMING =====`);
-    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
+    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Name: ${notifyName ?? 'unknown'} | Text: ${messageText}`);
 
     // ── Cross-institute loop prevention ──────────────────────────────────
     // If the sender is another institute in our system, skip AI reply
     // to prevent infinite AI-to-AI loop. Still save as lead for manual review.
 					
-				 
     const crossCheck = await pool.query(
-							   
       `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
-			
-											   
-							  
-				
       [phoneClean],
     );
     if (crossCheck.rows.length > 0) {
       console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
-																				 
-      void saveLead(Number(instituteId), studentPhone, messageText);
+      void saveLead(Number(instituteId), studentPhone, messageText, notifyName);
       return;
     }
-
-											 
-																								 
 
 					 
 		 
 
     // Save lead first — checks status (lost/converted → skip reply)
-    const { skipReply } = await saveLead(Number(instituteId), studentPhone, messageText);
+    const { skipReply } = await saveLead(Number(instituteId), studentPhone, messageText, notifyName);
     if (skipReply) return;
 
     // AI reply
@@ -711,15 +681,34 @@ export async function sendMessageToStudent(
   toNumber: string,
   message: string,
 ): Promise<boolean> {
-  const s = sessions.get(instituteId);
-  if (!s || s.status !== 'connected') return false;
-  try {
-    await s.client.sendMessage(toNumber, message);
-    return true;
-  } catch (err) {
-    console.error(`[WA] sendMessageToStudent failed:`, err);
-    return false;
+  // Try all connected sessions for this institute
+  for (const [key, s] of sessions.entries()) {
+    if (!key.startsWith(instituteId) && key !== instituteId) continue;
+    if (s.status !== 'connected') continue;
+
+    try {
+      await s.client.sendMessage(toNumber, message);
+      return true;
+    } catch (err) {
+      const errMsg = err instanceof Error ? err.message : String(err);
+
+      // "No LID for user" — this number uses WhatsApp's newer @lid format.
+      // Strip @c.us and retry with @lid format.
+      if (errMsg.includes('No LID') && toNumber.endsWith('@c.us')) {
+        const lidNumber = toNumber.replace('@c.us', '') + '@lid';
+        console.log(`[WA] Retrying with @lid format: ${lidNumber}`);
+        try {
+          await s.client.sendMessage(lidNumber, message);
+          return true;
+        } catch (lidErr) {
+          console.error(`[WA] sendMessageToStudent @lid retry also failed:`, lidErr);
+        }
+      } else {
+        console.error(`[WA] sendMessageToStudent failed on ${key}:`, err);
+      }
+    }
   }
+  return false;
 }
 
 export async function restoreAllSessions(): Promise<void> {

@@ -15,8 +15,9 @@ function getOpenAI(): OpenAI {
     if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set.');
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
-	    baseURL: 'https://api.openai.com/v1',
-												
+	  baseURL: 'https://api.openai.com/v1',
+										  
+			
     });
   }
   return openai;
@@ -141,34 +142,6 @@ router.get('/:instituteId/usage', async (req: Request, res: Response) => {
   }
 });
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 // ── POST /api/leads — manually add a lead from dashboard ────────────────────
 
 router.post('/', async (req: Request, res: Response) => {
@@ -206,19 +179,6 @@ router.post('/', async (req: Request, res: Response) => {
       });
       return;
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     const result = await pool.query(
       `INSERT INTO leads
@@ -298,6 +258,24 @@ router.patch('/:id/notes', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('Update notes error:', err);
     res.status(500).json({ error: 'Failed to update notes.' });
+  }
+});
+
+// ── PATCH /api/leads/:id/name ─────────────────────────────────────────────────
+// Allows institute owner to manually set/correct a lead's name
+
+router.patch('/:id/name', async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const { name } = req.body as { name?: string | null };
+  try {
+    await pool.query(
+      `UPDATE leads SET student_name = $1 WHERE id = $2`,
+      [name?.trim() || null, Number(id)],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Update name error:', err);
+    res.status(500).json({ error: 'Failed to update name.' });
   }
 });
 
