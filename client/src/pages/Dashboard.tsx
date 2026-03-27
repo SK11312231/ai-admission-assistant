@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
@@ -142,6 +142,7 @@ function formatFollowUp(date: string | null): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [institute, setInstitute] = useState<Institute | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile sidebar drawer
   const [profileCompleteness, setProfileCompleteness] = useState<{
@@ -151,6 +152,16 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<Tab>('leads');
+
+  // Verification state (Basic Info tab)
+  const [emailVerifySending, setEmailVerifySending] = useState(false);
+  const [emailVerifyMsg, setEmailVerifyMsg] = useState<string | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpValue, setOtpValue] = useState(['', '', '', '', '', '']);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpCooldown, setOtpCooldown] = useState(0);
 
   // WhatsApp
   const [showQRModal, setShowQRModal] = useState(false);
@@ -173,6 +184,25 @@ export default function Dashboard() {
   const [profileSaving, setProfileSaving] = useState(false);
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [reEnriching, setReEnriching] = useState(false);
+  // Profile section sub-tab
+  const [profileSection, setProfileSection] = useState<'basic' | 'details' | 'hours' | 'password' | 'notifications'>('basic');
+  // Basic info form
+  const [basicForm, setBasicForm] = useState({ name: '', phone: '', website: '' });
+  const [basicSaving, setBasicSaving] = useState(false);
+  const [basicMsg, setBasicMsg] = useState<string | null>(null);
+  // Business hours
+  const DEFAULT_HOURS = { mon: { open: '09:00', close: '18:00', closed: false }, tue: { open: '09:00', close: '18:00', closed: false }, wed: { open: '09:00', close: '18:00', closed: false }, thu: { open: '09:00', close: '18:00', closed: false }, fri: { open: '09:00', close: '18:00', closed: false }, sat: { open: '09:00', close: '14:00', closed: false }, sun: { open: '09:00', close: '14:00', closed: true } };
+  const [businessHours, setBusinessHours] = useState<Record<string, { open: string; close: string; closed: boolean }>>(DEFAULT_HOURS);
+  const [hoursSaving, setHoursSaving] = useState(false);
+  const [hoursMsg, setHoursMsg] = useState<string | null>(null);
+  // Notifications
+  const [notifPrefs, setNotifPrefs] = useState({ notify_new_lead: true, notify_followup_due: true, notify_weekly_summary: false });
+  const [notifSaving, setNotifSaving] = useState(false);
+  const [notifMsg, setNotifMsg] = useState<string | null>(null);
+  // Password change
+  const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
+  const [pwSaving, setPwSaving] = useState(false);
+  const [pwMsg, setPwMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   // ── Analytics state ─────────────────────────────────────────────────────────
   const [analyticsOverview, setAnalyticsOverview] = useState<AnalyticsOverview | null>(null);
@@ -240,6 +270,14 @@ export default function Dashboard() {
 
     setInstitute(inst);
 
+    // Read ?tab= from URL (e.g. after payment redirect: /dashboard?tab=profile)
+    const tabParam = searchParams.get('tab') as Tab | null;
+    if (tabParam) {
+      setActiveTab(tabParam);
+      // If redirected to profile tab, open basic section
+      if (tabParam === 'profile') setProfileSection('basic');
+    }
+
     void (async () => {
       // Always verify actual WA status from server — never trust localStorage alone
       try {
@@ -302,6 +340,11 @@ export default function Dashboard() {
   // ── Profile tab load ────────────────────────────────────────────────────────
   useEffect(() => {
     if (activeTab !== 'profile' || !institute) return;
+    // Always reset to basic section when switching to profile tab
+    setProfileSection('basic');
+    setBasicForm({ name: institute.name, phone: institute.phone, website: institute.website ?? '' });
+    setBasicMsg(null); setHoursMsg(null); setNotifMsg(null); setPwMsg(null);
+    // Pre-load AI details data in background
     void (async () => {
       setProfileLoading(true);
       try {
@@ -311,7 +354,7 @@ export default function Dashboard() {
       } catch { setProfileData(''); }
       finally { setProfileLoading(false); }
     })();
-  }, [activeTab, institute]);
+  }, [activeTab, institute]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (activeTab !== 'analytics' || !institute) return;
@@ -505,6 +548,173 @@ setShowQRModal(true);
       setProfileMsg('Re-enrichment started. Refresh this tab in ~15 seconds.');
     } catch { setProfileMsg('Failed to start re-enrichment.'); }
     finally { setReEnriching(false); }
+  };
+
+  // ── Profile section loaders ──────────────────────────────────────────────────
+  const loadProfileSectionData = async (section: typeof profileSection) => {
+    if (!institute) return;
+    if (section === 'basic') {
+      setBasicForm({ name: institute.name, phone: institute.phone, website: institute.website ?? '' });
+    }
+    if (section === 'hours') {
+      try {
+        const res = await fetch(apiUrl(`/api/institutes/${institute.id}/business-hours`));
+        if (res.ok) {
+          const data = await res.json() as { business_hours: Record<string, { open: string; close: string; closed: boolean }> | null };
+          if (data.business_hours) setBusinessHours(data.business_hours);
+        }
+      } catch { /* use defaults */ }
+    }
+    if (section === 'notifications') {
+      try {
+        const res = await fetch(apiUrl(`/api/institutes/${institute.id}/notification-preferences`));
+        if (res.ok) setNotifPrefs(await res.json() as typeof notifPrefs);
+      } catch { /* use defaults */ }
+    }
+  };
+
+  const handleProfileSectionChange = (section: typeof profileSection) => {
+    setProfileSection(section);
+    void loadProfileSectionData(section);
+    setBasicMsg(null); setHoursMsg(null); setNotifMsg(null); setPwMsg(null);
+  };
+
+  // ── OTP cooldown timer ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const t = setInterval(() => setOtpCooldown(c => c - 1), 1000);
+    return () => clearInterval(t);
+  }, [otpCooldown]);
+
+  // ── Email verification — send magic link ─────────────────────────────────────
+  const handleSendEmailVerification = async () => {
+    if (!institute) return;
+    setEmailVerifySending(true); setEmailVerifyMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/resend-verification-email`), { method: 'POST' });
+      const data = await res.json() as { success?: boolean; already_verified?: boolean };
+      if (data.already_verified) {
+        const updated = { ...institute, email_verified: true };
+        setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+        setEmailVerifyMsg('already_verified');
+      } else {
+        setEmailVerifyMsg('sent');
+      }
+    } catch { setEmailVerifyMsg('error'); }
+    finally { setEmailVerifySending(false); }
+  };
+
+  // ── Phone OTP — send via SMS ─────────────────────────────────────────────────
+  const handleSendPhoneOTP = async () => {
+    if (!institute) return;
+    setOtpSending(true); setOtpError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/send-phone-otp`), { method: 'POST' });
+      const data = await res.json() as { success?: boolean; already_verified?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to send OTP.');
+      if (data.already_verified) {
+        const updated = { ...institute, phone_verified: true };
+        setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+        return;
+      }
+      setOtpCooldown(60); setShowOtpModal(true);
+    } catch (err) {
+      setOtpError(err instanceof Error ? err.message : 'Failed to send OTP.');
+    } finally { setOtpSending(false); }
+  };
+
+  // ── Phone OTP — verify ───────────────────────────────────────────────────────
+  const handleVerifyOTP = async (code?: string) => {
+    if (!institute) return;
+    const otp = code ?? otpValue.join('');
+    if (otp.length !== 6) { setOtpError('Please enter the 6-digit OTP.'); return; }
+    setOtpVerifying(true); setOtpError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/verify-phone-otp`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp }),
+      });
+      const data = await res.json() as { success?: boolean; error?: string; institute?: Record<string, unknown> };
+      if (!res.ok) {
+        setOtpError(data.error ?? 'Incorrect OTP.');
+        setOtpValue(['', '', '', '', '', '']);
+        return;
+      }
+      const updated = { ...institute, phone_verified: true };
+      setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+      setShowOtpModal(false); setOtpValue(['', '', '', '', '', '']);
+    } catch { setOtpError('Verification failed. Please try again.'); }
+    finally { setOtpVerifying(false); }
+  };
+
+  // ── Basic info save ──────────────────────────────────────────────────────────
+  const handleSaveBasicInfo = async () => {
+    if (!institute) return;
+    if (!basicForm.name.trim()) { setBasicMsg('Institute name is required.'); return; }
+    setBasicSaving(true); setBasicMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/basic-info`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(basicForm),
+      });
+      const data = await res.json() as Record<string, unknown>;
+      if (!res.ok) throw new Error((data.error as string) ?? 'Failed to save.');
+      const updated = { ...institute, ...data };
+      setInstitute(updated as typeof institute);
+      localStorage.setItem('institute', JSON.stringify(updated));
+      setBasicMsg('✅ Basic info saved successfully.');
+    } catch (err) { setBasicMsg(err instanceof Error ? err.message : 'Failed to save.'); }
+    finally { setBasicSaving(false); }
+  };
+
+  // ── Business hours save ──────────────────────────────────────────────────────
+  const handleSaveHours = async () => {
+    if (!institute) return;
+    setHoursSaving(true); setHoursMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/business-hours`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ business_hours: businessHours }),
+      });
+      if (!res.ok) throw new Error();
+      setHoursMsg('✅ Business hours saved successfully.');
+    } catch { setHoursMsg('Failed to save business hours.'); }
+    finally { setHoursSaving(false); }
+  };
+
+  // ── Notifications save ───────────────────────────────────────────────────────
+  const handleSaveNotifications = async () => {
+    if (!institute) return;
+    setNotifSaving(true); setNotifMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/notification-preferences`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(notifPrefs),
+      });
+      if (!res.ok) throw new Error();
+      setNotifMsg('✅ Notification preferences saved.');
+    } catch { setNotifMsg('Failed to save preferences.'); }
+    finally { setNotifSaving(false); }
+  };
+
+  // ── Password change ──────────────────────────────────────────────────────────
+  const handleChangePassword = async () => {
+    if (!institute) return;
+    if (!pwForm.current || !pwForm.next) { setPwMsg({ type: 'error', text: 'All fields are required.' }); return; }
+    if (pwForm.next.length < 8) { setPwMsg({ type: 'error', text: 'New password must be at least 8 characters.' }); return; }
+    if (pwForm.next !== pwForm.confirm) { setPwMsg({ type: 'error', text: 'New passwords do not match.' }); return; }
+    setPwSaving(true); setPwMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/change-password`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ current_password: pwForm.current, new_password: pwForm.next }),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed.');
+      setPwMsg({ type: 'success', text: '✅ Password changed successfully.' });
+      setPwForm({ current: '', next: '', confirm: '' });
+    } catch (err) { setPwMsg({ type: 'error', text: err instanceof Error ? err.message : 'Failed.' }); }
+    finally { setPwSaving(false); }
   };
 
   // ── Lead actions ────────────────────────────────────────────────────────────
@@ -797,6 +1007,65 @@ setShowQRModal(true);
         />
       )}
       {/* ─────────────────────── MODALS (unchanged) ──────────────────────────── */}
+
+      {/* Phone OTP Verification Modal */}
+      {showOtpModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={e => { if (e.target === e.currentTarget) setShowOtpModal(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <div className="text-center mb-5">
+              <div className="w-14 h-14 bg-green-50 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">📱</div>
+              <h2 className="text-lg font-bold text-gray-900">Verify WhatsApp Number</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Enter the 6-digit OTP sent via SMS to <strong>{institute?.whatsapp_number}</strong>
+              </p>
+            </div>
+
+            {otpError && (
+              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-2.5 mb-4 text-center">
+                {otpError}
+              </div>
+            )}
+
+            {/* 6 OTP boxes */}
+            <div className="flex justify-center gap-2 mb-5">
+              {otpValue.map((digit, i) => (
+                <input key={i} type="text" inputMode="numeric" maxLength={1} value={digit}
+                  ref={el => { if (el) el.dataset.idx = String(i); }}
+                  onChange={e => {
+                    if (!/^\d*$/.test(e.target.value)) return;
+                    const next = [...otpValue]; next[i] = e.target.value.slice(-1); setOtpValue(next); setOtpError(null);
+                    if (e.target.value && i < 5) (e.target.nextElementSibling as HTMLInputElement)?.focus();
+                    if (next.every(d => d !== '')) void handleVerifyOTP(next.join(''));
+                  }}
+                  onKeyDown={e => { if (e.key === 'Backspace' && !digit && i > 0) (e.currentTarget.previousElementSibling as HTMLInputElement)?.focus(); }}
+                  className={`w-11 h-13 text-center text-xl font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors py-2 ${digit ? 'border-indigo-400 bg-indigo-50' : 'border-gray-300'} ${otpError ? 'border-red-400 bg-red-50' : ''}`}
+                />
+              ))}
+            </div>
+
+            <button onClick={() => void handleVerifyOTP()} disabled={otpVerifying || otpValue.join('').length < 6}
+              className="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm mb-3">
+              {otpVerifying ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Verifying…
+                </span>
+              ) : '✅ Verify'}
+            </button>
+
+            <div className="flex items-center justify-between">
+              <button onClick={() => void handleSendPhoneOTP()} disabled={otpSending || otpCooldown > 0}
+                className="text-xs text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline">
+                {otpSending ? 'Sending…' : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : '🔁 Resend OTP'}
+              </button>
+              <button onClick={() => { setShowOtpModal(false); setOtpValue(['','','','','','']); setOtpError(null); }}
+                className="text-xs text-gray-400 hover:text-gray-600">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* QR Modal */}
       {showQRModal && (
@@ -1937,40 +2206,267 @@ setShowQRModal(true);
       )}
 
       {/* ── Profile Tab ──────────────────────────────────────────────────────── */}
-      {activeTab === 'profile' && (
+      {activeTab === 'profile' && institute && (
         <div>
-          <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
-            <div>
-              <h2 className="text-base font-semibold text-gray-900">Institute Profile</h2>
-              <p className="text-xs text-gray-500 mt-0.5">This data is used by the AI to answer student queries accurately.</p>
+          {/* Section header */}
+          <div className="mb-6">
+            <h2 className="text-base font-semibold text-gray-900 mb-4">Institute Profile</h2>
+            {/* Sub-tab nav */}
+            <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-full overflow-x-auto">
+              {([
+                { key: 'basic', label: '🏫 Basic Info' },
+                { key: 'details', label: '🤖 AI Details' },
+                { key: 'hours', label: '🕐 Hours' },
+                { key: 'notifications', label: '🔔 Notifications' },
+                { key: 'password', label: '🔒 Password' },
+              ] as const).map(s => (
+                <button key={s.key}
+                  onClick={() => handleProfileSectionChange(s.key)}
+                  className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
+                    profileSection === s.key ? 'bg-white text-gray-900 shadow-sm' : 'text-gray-500 hover:text-gray-700'
+                  }`}>
+                  {s.label}
+                </button>
+              ))}
             </div>
-            <button onClick={() => void handleReEnrich()} disabled={reEnriching}
-              className="flex-shrink-0 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
-              {reEnriching ? 'Re-fetching…' : '🔄 Re-fetch from website'}
-            </button>
           </div>
-          {profileMsg && (
-            <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${profileMsg.toLowerCase().includes('success') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
-              {profileMsg}
+
+          {/* ── Basic Info ── */}
+          {profileSection === 'basic' && (
+            <div className="max-w-lg">
+              <p className="text-xs text-gray-500 mb-5">Update your institute's basic information. Email and WhatsApp number can only be changed by contacting support.</p>
+              {basicMsg && (
+                <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${basicMsg.startsWith('✅') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-600'}`}>
+                  {basicMsg}
+                </div>
+              )}
+              <div className="space-y-4">
+                {[
+                  { label: 'Institute Name', key: 'name' as const, type: 'text', placeholder: 'e.g. ABC Coaching Center' },
+                  { label: 'Phone Number', key: 'phone' as const, type: 'tel', placeholder: 'e.g. 9876543210' },
+                  { label: 'Website', key: 'website' as const, type: 'url', placeholder: 'e.g. https://yoursite.com' },
+                ].map(field => (
+                  <div key={field.key}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
+                    <input type={field.type} value={basicForm[field.key]}
+                      onChange={e => setBasicForm(f => ({ ...f, [field.key]: e.target.value }))}
+                      placeholder={field.placeholder}
+                      className="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                ))}
+                {/* Read-only fields with verify buttons */}
+                {[
+                  {
+                    label: 'Email Address',
+                    value: institute.email,
+                    verified: institute.email_verified,
+                    onVerify: handleSendEmailVerification,
+                    verifying: emailVerifySending,
+                    type: 'email',
+                  },
+                  {
+                    label: 'WhatsApp Number',
+                    value: institute.whatsapp_number,
+                    verified: institute.phone_verified,
+                    onVerify: handleSendPhoneOTP,
+                    verifying: otpSending,
+                    type: 'phone',
+                  },
+                ].map(f => (
+                  <div key={f.label}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{f.label}</label>
+                    <div className="w-full text-sm border border-gray-200 bg-gray-50 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+                      <span className="text-gray-700 truncate">{f.value}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {f.verified ? (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            Verified
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => void f.onVerify()}
+                            disabled={f.verifying}
+                            className="text-xs font-semibold text-indigo-600 border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors disabled:opacity-50">
+                            {f.verifying ? 'Sending…' : f.type === 'email' ? '📧 Verify Email' : '📱 Verify via SMS'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                    {/* Email verify feedback */}
+                    {f.type === 'email' && emailVerifyMsg === 'sent' && (
+                      <p className="text-xs text-green-600 mt-1">✅ Verification link sent to {f.value}. Check your inbox.</p>
+                    )}
+                    {f.type === 'email' && emailVerifyMsg === 'error' && (
+                      <p className="text-xs text-red-500 mt-1">Failed to send. Please try again.</p>
+                    )}
+                    {/* Phone OTP error */}
+                    {f.type === 'phone' && otpError && !showOtpModal && (
+                      <p className="text-xs text-red-500 mt-1">{otpError}</p>
+                    )}
+                  </div>
+                ))}
+                <div className="flex justify-end pt-2">
+                  <button onClick={() => void handleSaveBasicInfo()} disabled={basicSaving}
+                    className="bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                    {basicSaving ? 'Saving…' : 'Save Changes'}
+                  </button>
+                </div>
+              </div>
             </div>
           )}
-          {profileLoading ? (
-            <div className="text-center py-16 text-gray-400">
-              <div className="text-3xl mb-3 animate-spin inline-block">⏳</div>
-              <p className="text-sm">Loading profile…</p>
-            </div>
-          ) : (
-            <>
-              <textarea value={profileData} onChange={e => setProfileData(e.target.value)} rows={20}
-                placeholder="No profile data yet. Click 'Re-fetch from website' to auto-generate, or type your institute's information here."
-                className="w-full text-sm border border-gray-300 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-mono" />
-              <div className="flex justify-end mt-3">
-                <button onClick={() => void handleSaveProfile()} disabled={profileSaving}
-                  className="bg-indigo-600 text-white text-sm font-semibold px-5 py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50">
-                  {profileSaving ? 'Saving…' : 'Save Profile'}
+
+          {/* ── AI Details ── */}
+          {profileSection === 'details' && (
+            <div>
+              <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 mb-4">
+                <p className="text-xs text-gray-500">This data is used by the AI to answer student queries accurately. The more detail you add, the better the AI replies.</p>
+                <button onClick={() => void handleReEnrich()} disabled={reEnriching}
+                  className="flex-shrink-0 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 px-3 py-1.5 rounded-lg hover:bg-indigo-100 disabled:opacity-50 whitespace-nowrap">
+                  {reEnriching ? 'Re-fetching…' : '🔄 Re-fetch from website'}
                 </button>
               </div>
-            </>
+              {profileMsg && (
+                <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${profileMsg.startsWith('✅') || profileMsg.toLowerCase().includes('success') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-amber-50 border border-amber-200 text-amber-700'}`}>
+                  {profileMsg}
+                </div>
+              )}
+              {profileLoading ? (
+                <div className="text-center py-16 text-gray-400">
+                  <div className="text-3xl mb-3 animate-spin inline-block">⏳</div>
+                  <p className="text-sm">Loading profile…</p>
+                </div>
+              ) : (
+                <>
+                  <textarea value={profileData} onChange={e => setProfileData(e.target.value)} rows={20}
+                    placeholder="No profile data yet. Click 'Re-fetch from website' to auto-generate, or type your institute's information here."
+                    className="w-full text-sm border border-gray-300 rounded-xl p-4 focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-y font-mono" />
+                  <div className="flex justify-end mt-3">
+                    <button onClick={() => void handleSaveProfile()} disabled={profileSaving}
+                      className="bg-indigo-600 text-white text-sm font-semibold px-5 py-2 rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                      {profileSaving ? 'Saving…' : 'Save Profile'}
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )}
+
+          {/* ── Business Hours ── */}
+          {profileSection === 'hours' && (
+            <div className="max-w-lg">
+              <p className="text-xs text-gray-500 mb-5">The AI uses this to tell students when your office is open. You're available 24/7 on WhatsApp regardless.</p>
+              {hoursMsg && (
+                <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${hoursMsg.startsWith('✅') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-600'}`}>
+                  {hoursMsg}
+                </div>
+              )}
+              <div className="space-y-2">
+                {(['mon','tue','wed','thu','fri','sat','sun'] as const).map(day => {
+                  const labels: Record<string, string> = { mon:'Monday', tue:'Tuesday', wed:'Wednesday', thu:'Thursday', fri:'Friday', sat:'Saturday', sun:'Sunday' };
+                  const h = businessHours[day] ?? { open: '09:00', close: '18:00', closed: false };
+                  return (
+                    <div key={day} className="flex items-center gap-3 bg-white border border-gray-200 rounded-xl px-4 py-3">
+                      <div className="w-24 flex-shrink-0">
+                        <span className="text-sm font-medium text-gray-700">{labels[day]}</span>
+                      </div>
+                      <label className="flex items-center gap-1.5 flex-shrink-0">
+                        <input type="checkbox" checked={!h.closed}
+                          onChange={e => setBusinessHours(prev => ({ ...prev, [day]: { ...h, closed: !e.target.checked } }))}
+                          className="w-4 h-4 accent-indigo-600" />
+                        <span className="text-xs text-gray-500">Open</span>
+                      </label>
+                      {!h.closed ? (
+                        <div className="flex items-center gap-2 flex-1">
+                          <input type="time" value={h.open}
+                            onChange={e => setBusinessHours(prev => ({ ...prev, [day]: { ...h, open: e.target.value } }))}
+                            className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                          <span className="text-xs text-gray-400">to</span>
+                          <input type="time" value={h.close}
+                            onChange={e => setBusinessHours(prev => ({ ...prev, [day]: { ...h, close: e.target.value } }))}
+                            className="text-xs border border-gray-300 rounded-lg px-2 py-1.5 focus:outline-none focus:ring-1 focus:ring-indigo-500" />
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400 italic">Closed</span>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex justify-end pt-4">
+                <button onClick={() => void handleSaveHours()} disabled={hoursSaving}
+                  className="bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                  {hoursSaving ? 'Saving…' : 'Save Hours'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Notifications ── */}
+          {profileSection === 'notifications' && (
+            <div className="max-w-lg">
+              <p className="text-xs text-gray-500 mb-5">Choose which email notifications you receive. Emails go to <strong>{institute.email}</strong>.</p>
+              {notifMsg && (
+                <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${notifMsg.startsWith('✅') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-600'}`}>
+                  {notifMsg}
+                </div>
+              )}
+              <div className="space-y-3">
+                {([
+                  { key: 'notify_new_lead' as const, title: 'New Lead Alert', desc: 'Get notified instantly when a new student messages your WhatsApp.' },
+                  { key: 'notify_followup_due' as const, title: 'Follow-up Reminders', desc: 'Daily email listing leads whose follow-up date is today.' },
+                  { key: 'notify_weekly_summary' as const, title: 'Weekly Summary', desc: 'Weekly digest with total leads, conversions, and top performing days.' },
+                ]).map(pref => (
+                  <div key={pref.key} className="flex items-start justify-between gap-4 bg-white border border-gray-200 rounded-xl p-4">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900">{pref.title}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{pref.desc}</p>
+                    </div>
+                    <button
+                      onClick={() => setNotifPrefs(p => ({ ...p, [pref.key]: !p[pref.key] }))}
+                      className={`flex-shrink-0 w-11 h-6 rounded-full transition-colors relative ${notifPrefs[pref.key] ? 'bg-indigo-600' : 'bg-gray-300'}`}>
+                      <span className={`absolute top-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${notifPrefs[pref.key] ? 'translate-x-5' : 'translate-x-0.5'}`} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+              <div className="flex justify-end pt-4">
+                <button onClick={() => void handleSaveNotifications()} disabled={notifSaving}
+                  className="bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                  {notifSaving ? 'Saving…' : 'Save Preferences'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* ── Password ── */}
+          {profileSection === 'password' && (
+            <div className="max-w-sm">
+              <p className="text-xs text-gray-500 mb-5">Choose a strong password with at least 8 characters.</p>
+              {pwMsg && (
+                <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${pwMsg.type === 'success' ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-600'}`}>
+                  {pwMsg.text}
+                </div>
+              )}
+              <div className="space-y-4">
+                {[
+                  { label: 'Current Password', key: 'current' as const },
+                  { label: 'New Password', key: 'next' as const },
+                  { label: 'Confirm New Password', key: 'confirm' as const },
+                ].map(field => (
+                  <div key={field.key}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">{field.label}</label>
+                    <input type="password" value={pwForm[field.key]}
+                      onChange={e => { setPwForm(f => ({ ...f, [field.key]: e.target.value })); setPwMsg(null); }}
+                      className="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  </div>
+                ))}
+                <button onClick={() => void handleChangePassword()} disabled={pwSaving}
+                  className="w-full bg-indigo-600 text-white text-sm font-semibold py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                  {pwSaving ? 'Changing…' : 'Change Password'}
+                </button>
+              </div>
+            </div>
           )}
         </div>
       )}

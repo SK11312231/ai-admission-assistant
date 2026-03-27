@@ -121,7 +121,7 @@ export default function CompletePayment() {
             const updated = { ...institute, plan: verifyData.plan, is_paid: true, is_premium_accessible: isPremiumPlan };
             localStorage.setItem('institute', JSON.stringify(updated));
             setSuccess(true);
-            setTimeout(() => navigate('/dashboard'), 2500);
+            setTimeout(() => navigate('/dashboard?tab=profile'), 2500);
           } catch (err) {
             setError(err instanceof Error ? err.message : 'Payment verification failed. Contact support@inquiai.in');
             setProcessing(false);
