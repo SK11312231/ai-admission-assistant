@@ -15,7 +15,7 @@ function getOpenAI(): OpenAI {
     if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set.');
     openai = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
-	  baseURL: 'https://api.groq.com/openai/v1',
+	    baseURL: 'https://api.openai.com/v1',
 												
     });
   }
