@@ -156,12 +156,13 @@ export default function Dashboard() {
   // Verification state (Basic Info tab)
   const [emailVerifySending, setEmailVerifySending] = useState(false);
   const [emailVerifyMsg, setEmailVerifyMsg] = useState<string | null>(null);
-  const [showOtpModal, setShowOtpModal] = useState(false);
-  const [otpSending, setOtpSending] = useState(false);
-  const [otpValue, setOtpValue] = useState(['', '', '', '', '', '']);
-  const [otpVerifying, setOtpVerifying] = useState(false);
-  const [otpError, setOtpError] = useState<string | null>(null);
-  const [otpCooldown, setOtpCooldown] = useState(0);
+  // PHONE VERIFICATION — commented until DLT registration is complete
+  // const [showOtpModal, setShowOtpModal] = useState(false);
+  // const [otpSending, setOtpSending] = useState(false);
+  // const [otpValue, setOtpValue] = useState(['', '', '', '', '', '']);
+  // const [otpVerifying, setOtpVerifying] = useState(false);
+  // const [otpError, setOtpError] = useState<string | null>(null);
+  // const [otpCooldown, setOtpCooldown] = useState(0);
 
   // WhatsApp
   const [showQRModal, setShowQRModal] = useState(false);
@@ -580,11 +581,12 @@ setShowQRModal(true);
   };
 
   // ── OTP cooldown timer ───────────────────────────────────────────────────────
-  useEffect(() => {
-    if (otpCooldown <= 0) return;
-    const t = setInterval(() => setOtpCooldown(c => c - 1), 1000);
-    return () => clearInterval(t);
-  }, [otpCooldown]);
+  // PHONE VERIFICATION — OTP cooldown timer (commented until DLT registration)
+  // useEffect(() => {
+  //   if (otpCooldown <= 0) return;
+  //   const t = setInterval(() => setOtpCooldown(c => c - 1), 1000);
+  //   return () => clearInterval(t);
+  // }, [otpCooldown]);
 
   // ── Email verification — send magic link ─────────────────────────────────────
   const handleSendEmailVerification = async () => {
@@ -604,48 +606,9 @@ setShowQRModal(true);
     finally { setEmailVerifySending(false); }
   };
 
-  // ── Phone OTP — send via SMS ─────────────────────────────────────────────────
-  const handleSendPhoneOTP = async () => {
-    if (!institute) return;
-    setOtpSending(true); setOtpError(null);
-    try {
-      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/send-phone-otp`), { method: 'POST' });
-      const data = await res.json() as { success?: boolean; already_verified?: boolean; error?: string };
-      if (!res.ok) throw new Error(data.error ?? 'Failed to send OTP.');
-      if (data.already_verified) {
-        const updated = { ...institute, phone_verified: true };
-        setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
-        return;
-      }
-      setOtpCooldown(60); setShowOtpModal(true);
-    } catch (err) {
-      setOtpError(err instanceof Error ? err.message : 'Failed to send OTP.');
-    } finally { setOtpSending(false); }
-  };
-
-  // ── Phone OTP — verify ───────────────────────────────────────────────────────
-  const handleVerifyOTP = async (code?: string) => {
-    if (!institute) return;
-    const otp = code ?? otpValue.join('');
-    if (otp.length !== 6) { setOtpError('Please enter the 6-digit OTP.'); return; }
-    setOtpVerifying(true); setOtpError(null);
-    try {
-      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/verify-phone-otp`), {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ otp }),
-      });
-      const data = await res.json() as { success?: boolean; error?: string; institute?: Record<string, unknown> };
-      if (!res.ok) {
-        setOtpError(data.error ?? 'Incorrect OTP.');
-        setOtpValue(['', '', '', '', '', '']);
-        return;
-      }
-      const updated = { ...institute, phone_verified: true };
-      setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
-      setShowOtpModal(false); setOtpValue(['', '', '', '', '', '']);
-    } catch { setOtpError('Verification failed. Please try again.'); }
-    finally { setOtpVerifying(false); }
-  };
+  // PHONE VERIFICATION — handlers commented until DLT registration is complete
+  // const handleSendPhoneOTP = async () => { ... };
+  // const handleVerifyOTP = async (code?: string) => { ... };
 
   // ── Basic info save ──────────────────────────────────────────────────────────
   const handleSaveBasicInfo = async () => {
@@ -1008,64 +971,7 @@ setShowQRModal(true);
       )}
       {/* ─────────────────────── MODALS (unchanged) ──────────────────────────── */}
 
-      {/* Phone OTP Verification Modal */}
-      {showOtpModal && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
-          onClick={e => { if (e.target === e.currentTarget) setShowOtpModal(false); }}>
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
-            <div className="text-center mb-5">
-              <div className="w-14 h-14 bg-green-50 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">📱</div>
-              <h2 className="text-lg font-bold text-gray-900">Verify WhatsApp Number</h2>
-              <p className="text-sm text-gray-500 mt-1">
-                Enter the 6-digit OTP sent via SMS to <strong>{institute?.whatsapp_number}</strong>
-              </p>
-            </div>
-
-            {otpError && (
-              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-2.5 mb-4 text-center">
-                {otpError}
-              </div>
-            )}
-
-            {/* 6 OTP boxes */}
-            <div className="flex justify-center gap-2 mb-5">
-              {otpValue.map((digit, i) => (
-                <input key={i} type="text" inputMode="numeric" maxLength={1} value={digit}
-                  ref={el => { if (el) el.dataset.idx = String(i); }}
-                  onChange={e => {
-                    if (!/^\d*$/.test(e.target.value)) return;
-                    const next = [...otpValue]; next[i] = e.target.value.slice(-1); setOtpValue(next); setOtpError(null);
-                    if (e.target.value && i < 5) (e.target.nextElementSibling as HTMLInputElement)?.focus();
-                    if (next.every(d => d !== '')) void handleVerifyOTP(next.join(''));
-                  }}
-                  onKeyDown={e => { if (e.key === 'Backspace' && !digit && i > 0) (e.currentTarget.previousElementSibling as HTMLInputElement)?.focus(); }}
-                  className={`w-11 h-13 text-center text-xl font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors py-2 ${digit ? 'border-indigo-400 bg-indigo-50' : 'border-gray-300'} ${otpError ? 'border-red-400 bg-red-50' : ''}`}
-                />
-              ))}
-            </div>
-
-            <button onClick={() => void handleVerifyOTP()} disabled={otpVerifying || otpValue.join('').length < 6}
-              className="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm mb-3">
-              {otpVerifying ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Verifying…
-                </span>
-              ) : '✅ Verify'}
-            </button>
-
-            <div className="flex items-center justify-between">
-              <button onClick={() => void handleSendPhoneOTP()} disabled={otpSending || otpCooldown > 0}
-                className="text-xs text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline">
-                {otpSending ? 'Sending…' : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : '🔁 Resend OTP'}
-              </button>
-              <button onClick={() => { setShowOtpModal(false); setOtpValue(['','','','','','']); setOtpError(null); }}
-                className="text-xs text-gray-400 hover:text-gray-600">
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Phone OTP Modal — coming soon after DLT registration */}
 
       {/* QR Modal */}
       {showQRModal && (
@@ -1448,7 +1354,7 @@ setShowQRModal(true);
         <main style={{ flex: 1, overflowY: 'auto', padding: '16px 16px 80px' }} className="dashboard-main">
 
           {/* ── Verification Banner ──────────────────────────────────────── */}
-          {institute && (!institute.email_verified || !institute.phone_verified) && (
+          {institute && (!institute.email_verified /* || !institute.phone_verified — phone verification coming soon */) && (
             <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: '12px', padding: '12px 16px', marginBottom: '16px', display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
               <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
                 <span style={{ fontSize: '18px', flexShrink: 0 }}>⚠️</span>
@@ -1463,12 +1369,10 @@ setShowQRModal(true);
                         📧 Verify Email →
                       </a>
                     )}
-                    {institute.email_verified && !institute.phone_verified && (
+                    {/* phone verification coming soon: institute.email_verified && !institute.phone_verified && (
                       <a href={`/verify-phone?id=${institute.id}`}
                         style={{ fontSize: '11px', color: '#b45309', background: '#fef3c7', border: '1px solid #fde68a', borderRadius: '6px', padding: '3px 10px', textDecoration: 'none', fontWeight: 500 }}>
-                        📱 Verify WhatsApp →
-                      </a>
-                    )}
+                        📱 Verify WhatsApp → </a> ) */}
                     {!institute.email_verified && (
                       <span style={{ fontSize: '11px', color: '#a16207' }}>
                         Check your inbox at {institute.email}
@@ -2264,14 +2168,8 @@ setShowQRModal(true);
                     verifying: emailVerifySending,
                     type: 'email',
                   },
-                  {
-                    label: 'WhatsApp Number',
-                    value: institute.whatsapp_number,
-                    verified: institute.phone_verified,
-                    onVerify: handleSendPhoneOTP,
-                    verifying: otpSending,
-                    type: 'phone',
-                  },
+                  // PHONE VERIFICATION — commented until DLT registration
+                  // { label: 'WhatsApp Number', value: institute.whatsapp_number, verified: institute.phone_verified, onVerify: handleSendPhoneOTP, verifying: otpSending, type: 'phone' },
                 ].map(f => (
                   <div key={f.label}>
                     <label className="block text-sm font-medium text-gray-700 mb-1">{f.label}</label>
@@ -2301,11 +2199,18 @@ setShowQRModal(true);
                       <p className="text-xs text-red-500 mt-1">Failed to send. Please try again.</p>
                     )}
                     {/* Phone OTP error */}
-                    {f.type === 'phone' && otpError && !showOtpModal && (
-                      <p className="text-xs text-red-500 mt-1">{otpError}</p>
-                    )}
+{/* phone OTP error — coming soon */}
                   </div>
                 ))}
+                {/* WhatsApp Number — read-only, verification coming soon */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">WhatsApp Number</label>
+                  <div className="w-full text-sm border border-gray-200 bg-gray-50 rounded-xl px-3 py-2.5 flex items-center justify-between">
+                    <span className="text-gray-700">{institute.whatsapp_number}</span>
+                    <span className="text-xs text-gray-400">Verification coming soon</span>
+                  </div>
+                </div>
+
                 <div className="flex justify-end pt-2">
                   <button onClick={() => void handleSaveBasicInfo()} disabled={basicSaving}
                     className="bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
