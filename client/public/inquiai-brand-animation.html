@@ -1,0 +1,1576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>InquiAI — Brand Animation</title>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka+One&family=Nunito:wght@400;600;700;800;900&display=swap" rel="stylesheet">
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: #08080f;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  font-family: 'Nunito', sans-serif;
+  user-select: none;
+}
+
+#wrapper {
+  width: min(960px, 98vw);
+}
+
+#stage {
+  width: 100%;
+  aspect-ratio: 16/9;
+  position: relative;
+  overflow: hidden;
+  border-radius: 16px;
+  box-shadow: 0 40px 120px rgba(0,0,0,0.9), 0 0 0 1px rgba(255,255,255,0.05);
+  background: #1a1a2e;
+}
+
+.scene {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.6s ease;
+}
+.scene.active {
+  opacity: 1;
+  pointer-events: all;
+}
+
+/* ── HUD ───────────────────────────────────────────────── */
+#prog-wrap {
+  height: 3px;
+  background: rgba(255,255,255,0.08);
+  border-radius: 0 0 16px 16px;
+  overflow: hidden;
+  cursor: pointer;
+}
+#prog-bar {
+  height: 100%;
+  background: linear-gradient(90deg, #6366f1, #a78bfa, #f59e0b);
+  width: 0%;
+  transition: width 0.08s linear;
+}
+#hud {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 2px;
+}
+#scene-info {
+  font-size: 12px;
+  color: rgba(255,255,255,0.35);
+  letter-spacing: 0.04em;
+  font-weight: 600;
+}
+#ctrls { display: flex; gap: 6px; }
+.cbtn {
+  background: rgba(255,255,255,0.07);
+  border: 1px solid rgba(255,255,255,0.1);
+  color: rgba(255,255,255,0.7);
+  padding: 5px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  font-size: 12px;
+  transition: all 0.2s;
+}
+.cbtn:hover { background: rgba(255,255,255,0.15); color: white; }
+.cbtn.primary { background: rgba(99,102,241,0.3); border-color: #6366f1; color: #a5b4fc; }
+
+/* ══════════════════════════════════════════
+   SHARED COMPONENTS
+══════════════════════════════════════════ */
+
+/* Scene badge */
+.sbadge {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.55);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  color: white;
+  font-family: 'Fredoka One', cursive;
+  font-size: 15px;
+  padding: 5px 18px;
+  border-radius: 20px;
+  white-space: nowrap;
+  z-index: 50;
+  opacity: 0;
+  animation: badge-in 0.4s 0.2s both;
+  border: 1px solid rgba(255,255,255,0.1);
+}
+@keyframes badge-in { to { opacity: 1; } }
+
+/* Character base */
+.char {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  position: absolute;
+}
+.char-head {
+  width: 52px;
+  height: 52px;
+  background: #f4c590;
+  border-radius: 50%;
+  position: relative;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+}
+.char-body {
+  width: 44px;
+  height: 58px;
+  border-radius: 12px 12px 4px 4px;
+  margin-top: -4px;
+}
+.eye {
+  position: absolute;
+  background: #2d1b00;
+  border-radius: 50%;
+  width: 7px; height: 7px;
+}
+.eye.l { top: 18px; left: 12px; }
+.eye.r { top: 18px; right: 12px; }
+.mouth {
+  position: absolute;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 18px;
+  height: 7px;
+  border: 2.5px solid #c07050;
+  border-top: none;
+  border-radius: 0 0 10px 10px;
+}
+.mouth.sad {
+  border-bottom: none;
+  border-top: 2.5px solid #c07050;
+  border-radius: 10px 10px 0 0;
+  bottom: 14px;
+}
+.mouth.open {
+  width: 16px; height: 10px;
+  background: #a05040;
+  border-radius: 50%;
+  border: none; bottom: 10px;
+}
+.eyebrow {
+  position: absolute;
+  width: 10px; height: 3px;
+  background: #5d3a1a;
+  border-radius: 2px;
+}
+.eyebrow.l { top: 11px; left: 10px; transform: rotate(-10deg); }
+.eyebrow.r { top: 11px; right: 10px; transform: rotate(10deg); }
+.eyebrow.worried.l { transform: rotate(10deg); }
+.eyebrow.worried.r { transform: rotate(-10deg); }
+
+/* Phone prop */
+.prop-phone {
+  width: 62px;
+  height: 108px;
+  background: #111;
+  border-radius: 14px;
+  border: 3px solid #2a2a2a;
+  position: relative;
+  overflow: hidden;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.5), inset 0 0 0 1px rgba(255,255,255,0.05);
+}
+.prop-phone-screen {
+  position: absolute;
+  inset: 4px;
+  background: white;
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* WA header */
+.wa-hdr {
+  background: linear-gradient(135deg, #075e54, #128c7e);
+  height: 52px;
+  display: flex;
+  align-items: center;
+  padding: 0 18px;
+  gap: 10px;
+  color: white;
+  flex-shrink: 0;
+}
+.wa-avatar {
+  width: 36px; height: 36px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 16px;
+  background: rgba(255,255,255,0.2);
+  flex-shrink: 0;
+}
+.wa-name {
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  font-size: 15px;
+}
+.wa-online {
+  font-size: 10px;
+  opacity: 0.7;
+}
+
+/* Chat bubbles */
+.bbl-out {
+  background: #dcf8c6;
+  border-radius: 12px 12px 0 12px;
+  padding: 7px 12px;
+  max-width: 240px;
+  font-size: 12px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 600;
+  align-self: flex-end;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  opacity: 0;
+  transform: scale(0.8) translateY(8px);
+}
+.bbl-in {
+  background: white;
+  border-radius: 12px 12px 12px 0;
+  padding: 7px 12px;
+  max-width: 240px;
+  font-size: 12px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 600;
+  align-self: flex-start;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+  opacity: 0;
+  transform: scale(0.8) translateY(8px);
+}
+.bbl-out.pop, .bbl-in.pop {
+  animation: bbl-pop 0.35s cubic-bezier(0.175,0.885,0.32,1.275) forwards;
+}
+@keyframes bbl-pop {
+  to { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* Institute card */
+.inst-card {
+  background: white;
+  border-radius: 14px;
+  padding: 12px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  box-shadow: 0 4px 18px rgba(0,0,0,0.1);
+  opacity: 0;
+  transform: translateX(-50px) scale(0.95);
+  position: absolute;
+}
+.inst-card.slide-in {
+  animation: card-slide 0.45s cubic-bezier(0.175,0.885,0.32,1.275) forwards;
+}
+@keyframes card-slide {
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}
+.inst-ico {
+  width: 42px; height: 42px;
+  border-radius: 12px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 20px;
+  flex-shrink: 0;
+}
+.inst-info-name {
+  font-weight: 800;
+  font-size: 13px;
+  color: #1a1a3e;
+}
+.inst-info-sub {
+  font-size: 10px;
+  color: #888;
+  margin-top: 1px;
+}
+.wa-chip {
+  margin-left: auto;
+  background: #25d366;
+  color: white;
+  border-radius: 20px;
+  padding: 5px 11px;
+  font-size: 10px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* Keyframes utilities */
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes float-up { from { opacity: 0; transform: translateY(20px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes scale-in { from { opacity: 0; transform: scale(0.4); } to { opacity: 1; transform: scale(1); } }
+@keyframes bounce-in { from { opacity: 0; transform: scale(0.5) rotate(-10deg); } to { opacity: 1; transform: scale(1) rotate(0); } }
+@keyframes sway { 0%,100% { transform: rotate(-3deg); } 50% { transform: rotate(3deg); } }
+@keyframes bob { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-10px); } }
+@keyframes tap-anim { 0%,100% { transform: translateX(0); } 50% { transform: translateX(8px) rotate(-4deg); } }
+@keyframes sigh-anim { 0% { transform: translateY(0); } 50% { transform: translateY(12px) rotate(3deg); } 100% { transform: translateY(8px); } }
+@keyframes pulse-glow { 0%,100% { box-shadow: 0 0 0 2px #25d366, 0 8px 24px rgba(37,211,102,0.3); } 50% { box-shadow: 0 0 0 3px #25d366, 0 12px 40px rgba(37,211,102,0.6); } }
+@keyframes inst-glow { 0%,100% { box-shadow: 0 8px 28px rgba(99,102,241,0.35); transform: scale(1); } 50% { box-shadow: 0 12px 44px rgba(99,102,241,0.65); transform: scale(1.06); } }
+@keyframes zzz { 0%,100% { transform: translate(0,0) rotate(0); opacity: 0.4; } 50% { transform: translate(6px,-12px) rotate(15deg); opacity: 1; } }
+@keyframes ring { 0% { transform: translate(-50%,-50%) scale(0.8); opacity: 0.9; } 100% { transform: translate(-50%,-50%) scale(2.4); opacity: 0; } }
+@keyframes confetti-fly {
+  to { transform: translate(var(--tx), var(--ty)) rotate(var(--r)); opacity: 0; }
+}
+@keyframes tag-pop {
+  from { opacity: 0; transform: scale(0.4) rotate(-8deg); }
+  to { opacity: 1; transform: scale(1) rotate(0); }
+}
+@keyframes twinkle { from { opacity: 0.2; } to { opacity: 0.9; } }
+@keyframes type-cursor { 0%,100% { border-right-color: #333; } 50% { border-right-color: transparent; } }
+@keyframes dot-bounce { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-6px); } }
+
+/* ══════════════════════════════════════════
+   SCENE 1 — NIGHT INTENT
+══════════════════════════════════════════ */
+#s1 {
+  background: radial-gradient(ellipse at 30% 40%, #1a1060 0%, #0a0822 50%, #060414 100%);
+}
+.s1-floor {
+  position: absolute; bottom: 0; left: 0; width: 100%; height: 22%;
+  background: linear-gradient(to bottom, #1a0d35, #100826);
+}
+.s1-bed {
+  position: absolute; bottom: 22%; left: 50%; transform: translateX(-50%);
+  width: 34%; height: 16%;
+  background: #2c2870;
+  border-radius: 18px 18px 6px 6px;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+}
+.s1-bed::before {
+  content: '';
+  position: absolute; top: -18px; left: 12px;
+  width: 36%; height: 36px;
+  background: #e8d5f5;
+  border-radius: 10px;
+}
+.s1-bed::after {
+  content: '';
+  position: absolute; bottom: 0; left: 0; width: 100%; height: 55%;
+  background: #4040a8;
+  border-radius: 0 0 6px 6px;
+}
+.s1-moon {
+  position: absolute; top: 8%; right: 10%;
+  width: 64px; height: 64px;
+  background: #ffe08a;
+  border-radius: 50%;
+  box-shadow: 0 0 40px rgba(255,224,138,0.5);
+}
+.s1-moon::after {
+  content: '';
+  position: absolute; top: -6px; right: -8px;
+  width: 52px; height: 52px;
+  background: #0a0822;
+  border-radius: 50%;
+}
+.s1-char {
+  bottom: 36%; left: 47%;
+  animation: sway 3s ease-in-out infinite;
+}
+.s1-phone-wrap {
+  position: absolute;
+  bottom: 42%; left: 50%;
+  animation: s1-zoom 4s ease-in-out both;
+}
+@keyframes s1-zoom {
+  0% { transform: scale(1) translateY(0); }
+  60% { transform: scale(1.6) translateY(-18%) translateX(5%); }
+  100% { transform: scale(2) translateY(-22%) translateX(8%); }
+}
+.s1-phone-inner {
+  transform: rotate(-8deg);
+  filter: drop-shadow(0 8px 24px rgba(99,102,241,0.5));
+}
+.s1-search-row {
+  background: #f1f3f4;
+  border-radius: 4px;
+  padding: 2px 4px;
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin: 3px 2px;
+}
+.s1-search-text {
+  font-size: 4.5px;
+  color: #333;
+  font-family: 'Nunito', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  width: 0;
+  border-right: 1px solid #333;
+  animation: s1-type 1.5s 0.8s steps(30) both, type-cursor 0.6s 0.8s step-end infinite;
+}
+@keyframes s1-type { to { width: 75px; } }
+.s1-result-lines { padding: 3px; display: flex; flex-direction: column; gap: 3px; }
+.s1-result-lines div { height: 3px; background: #eee; border-radius: 2px; }
+
+/* ══════════════════════════════════════════
+   SCENE 2 — SEARCH RESULTS
+══════════════════════════════════════════ */
+#s2 {
+  background: linear-gradient(160deg, #f4f6ff 0%, #eaecf8 100%);
+}
+.s2-title {
+  position: absolute;
+  top: 16px; left: 50%; transform: translateX(-50%);
+  font-family: 'Fredoka One', cursive;
+  font-size: 18px;
+  color: #1a1a3e;
+  opacity: 0; animation: float-up 0.5s 0.3s both;
+}
+.s2-tap-ring {
+  position: absolute;
+  width: 24px; height: 24px;
+  border: 2px solid #6366f1;
+  border-radius: 50%;
+  opacity: 0;
+  pointer-events: none;
+}
+.s2-tap-ring.burst { animation: s2-ring 0.5s ease-out forwards; }
+@keyframes s2-ring { to { transform: scale(3); opacity: 0; } }
+
+/* ══════════════════════════════════════════
+   SCENE 3 — WHATSAPP OUTREACH
+══════════════════════════════════════════ */
+#s3 { background: #ddd5c8; }
+.s3-body {
+  position: absolute;
+  inset: 52px 0 0 0;
+  padding: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.s3-mini {
+  background: white;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  opacity: 0;
+  transform: translateY(15px);
+}
+.s3-mini.appear { animation: float-up 0.35s forwards; }
+.s3-mini-ico {
+  width: 38px; height: 38px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 18px; flex-shrink: 0;
+}
+.s3-mini-info { flex: 1; }
+.s3-mini-name { font-weight: 800; font-size: 13px; }
+.s3-mini-msg { font-size: 11px; color: #666; margin-top: 1px; }
+.s3-ticks { font-size: 15px; color: #4fc3f7; opacity: 0; }
+.s3-ticks.show { animation: fade-in 0.3s forwards; }
+
+/* ══════════════════════════════════════════
+   SCENE 4 — NO RESPONSE
+══════════════════════════════════════════ */
+#s4 { background: #ddd5c8; }
+.s4-body {
+  position: absolute;
+  inset: 52px 0 110px 0;
+  padding: 8px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.s4-mini {
+  background: #f0f0f0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+  filter: grayscale(0.4);
+  opacity: 0;
+}
+.s4-mini.appear { animation: fade-in 0.35s forwards; }
+.s4-typing {
+  position: absolute;
+  bottom: 116px; left: 14px;
+  background: white;
+  border-radius: 20px;
+  padding: 8px 16px;
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  opacity: 0;
+}
+.s4-typing.show { animation: s4-type-anim 2.5s 1.5s forwards; }
+@keyframes s4-type-anim {
+  0% { opacity: 0; }
+  15% { opacity: 1; }
+  80% { opacity: 1; }
+  100% { opacity: 0; }
+}
+.tdot {
+  width: 8px; height: 8px;
+  background: #bbb;
+  border-radius: 50%;
+  animation: dot-bounce 0.6s ease-in-out infinite;
+}
+.tdot:nth-child(2) { animation-delay: 0.15s; }
+.tdot:nth-child(3) { animation-delay: 0.3s; }
+.s4-char {
+  position: absolute;
+  bottom: 14px; right: 60px;
+  opacity: 0; animation: fade-in 0.5s 1s both;
+}
+.s4-char-inner { animation: sigh-anim 0.8s 2s ease-in-out both; }
+
+/* ══════════════════════════════════════════
+   SCENE 5 — INSTANT REPLIES
+══════════════════════════════════════════ */
+#s5 { background: #ddd5c8; }
+.s5-body {
+  position: absolute;
+  inset: 52px 0 90px 0;
+  padding: 10px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.s5-active {
+  background: white;
+  border-radius: 16px;
+  padding: 14px;
+  box-shadow: 0 0 0 2px #25d366, 0 8px 28px rgba(37,211,102,0.25);
+  animation: pulse-glow 1.5s ease-in-out infinite, float-up 0.4s both;
+  opacity: 0;
+}
+.s5-active:nth-child(2) { animation-delay: 0s, 0.3s; }
+.s5-active:nth-child(2) { animation: pulse-glow 1.5s 0.5s ease-in-out infinite, float-up 0.4s 0.35s both; }
+
+.s5-char {
+  position: absolute;
+  bottom: 10px; right: 55px;
+  opacity: 0; animation: fade-in 0.5s 1s both;
+}
+
+/* ══════════════════════════════════════════
+   SCENE 6 — SMOOTH CONVERSATION
+══════════════════════════════════════════ */
+#s6 { background: #ddd5c8; }
+.s6-chat {
+  position: absolute;
+  inset: 52px 0 64px 0;
+  padding: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  overflow: hidden;
+}
+.s6-tags {
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 64px;
+  background: white;
+  border-top: 1px solid #eee;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding: 10px 14px;
+  align-items: center;
+}
+.course-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  border-radius: 20px;
+  padding: 4px 12px;
+  font-size: 11px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 800;
+  opacity: 0;
+  transform: scale(0.4) rotate(-5deg);
+}
+.course-tag.pop { animation: tag-pop 0.4s cubic-bezier(0.175,0.885,0.32,1.275) forwards; }
+
+/* ══════════════════════════════════════════
+   SCENE 7 — DECISION MOMENT
+══════════════════════════════════════════ */
+#s7 {
+  background: radial-gradient(ellipse at center, #2d1b69 0%, #1a1040 60%, #0d0a2e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.s7-phone-wrap {
+  width: 200px;
+  position: relative;
+  z-index: 2;
+}
+.s7-phone-body {
+  width: 200px; height: 360px;
+  background: #111;
+  border-radius: 28px;
+  border: 4px solid #2a2a2a;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.7), 0 0 0 1px rgba(255,255,255,0.05);
+}
+.s7-phone-screen {
+  position: absolute;
+  inset: 4px;
+  background: #ddd5c8;
+  border-radius: 22px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.s7-chat-area {
+  flex: 1;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+}
+.s7-enroll-btn {
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  color: white;
+  border-radius: 24px;
+  padding: 11px 26px;
+  font-family: 'Fredoka One', cursive;
+  font-size: 15px;
+  align-self: center;
+  opacity: 0;
+  transform: scale(0.4);
+  animation: scale-in 0.5s 1.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards;
+  cursor: pointer;
+  box-shadow: 0 6px 24px rgba(99,102,241,0.5);
+  border: none;
+}
+.s7-check {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 90px;
+  opacity: 0;
+  background: rgba(0,0,0,0.5);
+  backdrop-filter: blur(4px);
+  border-radius: 28px;
+  z-index: 10;
+}
+.s7-check.show { animation: scale-in 0.5s cubic-bezier(0.175,0.885,0.32,1.275) forwards; }
+#s7-confetti { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
+.s7-glow-ring {
+  position: absolute;
+  width: 260px; height: 260px;
+  border: 2px solid rgba(99,102,241,0.3);
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%) scale(0.8);
+  opacity: 0;
+  animation: ring 2.5s ease-out infinite;
+}
+.s7-glow-ring:nth-child(2) { animation-delay: 0.7s; }
+.s7-glow-ring:nth-child(3) { animation-delay: 1.4s; }
+
+/* ══════════════════════════════════════════
+   SCENE 8 — CONTRAST SPLIT
+══════════════════════════════════════════ */
+#s8 { display: flex; }
+.s8-left {
+  width: 50%; height: 100%;
+  background: linear-gradient(160deg, #1c1c1c, #0e0e0e);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  position: relative;
+}
+.s8-divider {
+  position: absolute;
+  top: 0; left: 50%;
+  width: 3px; height: 100%;
+  background: linear-gradient(to bottom, transparent, #6366f1, #a78bfa, transparent);
+  z-index: 10;
+  transform: translateX(-50%);
+}
+.s8-right {
+  width: 50%; height: 100%;
+  background: linear-gradient(160deg, #f0f4ff, #e8f5f0);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  position: relative;
+}
+.sleep-card {
+  width: 78px; height: 78px;
+  background: #2a2a2a;
+  border-radius: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 30px;
+  filter: grayscale(1) brightness(0.4);
+  position: relative;
+}
+.zzz {
+  position: absolute;
+  top: -14px; right: -8px;
+  font-size: 14px;
+  animation: zzz 2s ease-in-out infinite;
+}
+.sleep-card:nth-child(2) { transform: scale(0.85); filter: grayscale(1) brightness(0.3); }
+.sleep-card:nth-child(2) .zzz { animation-delay: 0.7s; }
+.sleep-card:nth-child(3) { transform: scale(0.7); filter: grayscale(1) brightness(0.25); }
+.sleep-card:nth-child(3) .zzz { animation-delay: 1.4s; }
+.s8-left-label {
+  font-family: 'Fredoka One', cursive;
+  font-size: 15px;
+  color: #555;
+  position: absolute;
+  top: 14px; left: 50%; transform: translateX(-50%);
+  white-space: nowrap;
+}
+.s8-right-label {
+  font-family: 'Fredoka One', cursive;
+  font-size: 15px;
+  color: #6366f1;
+  position: absolute;
+  top: 14px; left: 50%; transform: translateX(-50%);
+  white-space: nowrap;
+}
+.active-inst {
+  width: 84px; height: 84px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: 20px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 36px;
+  box-shadow: 0 10px 32px rgba(99,102,241,0.45);
+  animation: inst-glow 1.5s ease-in-out infinite;
+}
+.active-bbl {
+  background: #dcf8c6;
+  border-radius: 12px;
+  padding: 6px 14px;
+  font-size: 11px;
+  font-family: 'Nunito', sans-serif;
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  opacity: 0;
+  animation: float-up 0.4s both;
+}
+.active-bbl:nth-child(3) { animation-delay: 0.3s; }
+.active-bbl:nth-child(4) { animation-delay: 0.6s; }
+
+/* ══════════════════════════════════════════
+   SCENE 9 — AI PRESENCE
+══════════════════════════════════════════ */
+#s9 {
+  background: radial-gradient(ellipse at center, #2d1b69 0%, #1a1040 60%, #0d0a2e 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.s9-rings {
+  position: absolute;
+  top: 50%; left: 50%;
+}
+.s9-ring {
+  position: absolute;
+  width: 180px; height: 180px;
+  border: 1.5px solid rgba(99,102,241,0.3);
+  border-radius: 50%;
+  top: 50%; left: 50%;
+  transform: translate(-50%,-50%);
+  animation: ring 2.5s ease-out infinite;
+}
+.s9-ring:nth-child(2) { animation-delay: 0.6s; }
+.s9-ring:nth-child(3) { animation-delay: 1.2s; }
+.s9-center {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+}
+.s9-icon {
+  width: 110px; height: 110px;
+  background: linear-gradient(135deg, #6366f1, #8b5cf6);
+  border-radius: 28px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 52px;
+  box-shadow: 0 16px 50px rgba(99,102,241,0.5);
+  animation: bounce-in 0.8s cubic-bezier(0.175,0.885,0.32,1.275) both;
+}
+.s9-label {
+  font-family: 'Fredoka One', cursive;
+  font-size: 26px;
+  color: #a5b4fc;
+  opacity: 0;
+  animation: float-up 0.5s 0.9s both;
+}
+.s9-sub {
+  font-family: 'Nunito', sans-serif;
+  font-size: 14px;
+  color: rgba(255,255,255,0.45);
+  opacity: 0;
+  animation: float-up 0.5s 1.4s both;
+  letter-spacing: 0.04em;
+}
+
+/* ══════════════════════════════════════════
+   SCENE 10 — FINAL FRAME
+══════════════════════════════════════════ */
+#s10 {
+  background: linear-gradient(180deg, #c8e8ff 0%, #e8f4ff 40%, #f0f4ff 100%);
+}
+.s10-shelf {
+  position: absolute;
+  top: 8%; left: 5%;
+  width: 80px; height: 120px;
+  background: #8b5e34;
+  border-radius: 6px;
+  display: flex;
+  flex-direction: column;
+  padding: 8px 6px;
+  gap: 4px;
+  box-shadow: 2px 2px 8px rgba(0,0,0,0.2);
+}
+.book { border-radius: 3px; flex: 1; }
+.s10-window {
+  position: absolute;
+  top: 8%; right: 8%;
+  width: 110px; height: 85px;
+  background: linear-gradient(160deg, #87ceeb, #b0dff7);
+  border: 6px solid #8b5e34;
+  border-radius: 4px;
+  overflow: hidden;
+  display: grid; grid-template-columns: 1fr 1fr;
+}
+.s10-window::before, .s10-window::after {
+  content: '';
+  border-right: 3px solid rgba(255,255,255,0.5);
+}
+.s10-desk {
+  position: absolute; bottom: 0; left: 0; width: 100%; height: 200px;
+  background: linear-gradient(to bottom, #a07020, #8b5e14);
+  border-radius: 20px 20px 0 0;
+}
+.s10-desk::before {
+  content: '';
+  position: absolute; top: 0; left: 0; width: 100%; height: 18px;
+  background: #c08830;
+  border-radius: 20px 20px 0 0;
+}
+.s10-laptop {
+  position: absolute;
+  bottom: 196px; left: 50%; transform: translateX(-50%);
+  opacity: 0; animation: float-up 0.7s 0.4s both;
+}
+.s10-laptop-screen {
+  width: 280px; height: 180px;
+  background: #1a1a2e;
+  border-radius: 12px 12px 0 0;
+  border: 6px solid #444;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.s10-laptop-hinge {
+  width: 300px; height: 14px;
+  background: #555;
+  border-radius: 0 0 8px 8px;
+  margin: 0 -10px;
+}
+.s10-laptop-content {
+  text-align: center;
+  opacity: 0; animation: fade-in 0.6s 1.2s both;
+}
+.s10-char {
+  position: absolute;
+  bottom: 194px; right: 22%;
+  opacity: 0; animation: fade-in 0.5s 0.6s both;
+}
+.s10-char-inner { animation: bob 1.2s ease-in-out infinite; }
+.s10-endcard {
+  position: absolute;
+  bottom: 28px; left: 0; right: 0;
+  text-align: center;
+  opacity: 0; animation: float-up 0.8s 1.5s both;
+}
+.s10-logo {
+  font-family: 'Fredoka One', cursive;
+  font-size: 38px;
+  background: linear-gradient(135deg, #1a1a3e, #6366f1, #8b5cf6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+  background-clip: text;
+  line-height: 1;
+}
+.s10-tagline {
+  font-family: 'Nunito', sans-serif;
+  font-size: 14px;
+  color: #6366f1;
+  font-style: italic;
+  margin-top: 4px;
+  font-weight: 700;
+}
+.s10-url {
+  font-size: 12px;
+  color: #aaa;
+  margin-top: 3px;
+}
+</style>
+</head>
+<body>
+<div id="wrapper">
+  <div id="stage">
+
+    <!-- ═══ SCENE 1 — NIGHT INTENT ═══ -->
+    <div class="scene" id="s1">
+      <div class="sbadge">🌙 Scene 1 — Night Intent</div>
+      <div class="s1-floor"></div>
+      <div class="s1-bed"></div>
+      <div class="s1-moon"></div>
+      <!-- stars added by JS -->
+      <!-- Character -->
+      <div class="char s1-char">
+        <div class="char-head">
+          <div class="eye l"></div>
+          <div class="eye r"></div>
+          <div class="eyebrow l"></div>
+          <div class="eyebrow r"></div>
+          <div class="mouth"></div>
+        </div>
+        <div class="char-body" style="background:#4a90e2;"></div>
+      </div>
+      <!-- Phone with zoom -->
+      <div class="s1-phone-wrap">
+        <div class="s1-phone-inner">
+          <div class="prop-phone" style="filter:drop-shadow(0 0 16px rgba(99,102,241,0.6));">
+            <div class="prop-phone-screen">
+              <div class="s1-search-row">
+                <span style="font-size:4px;">🔍</span>
+                <span class="s1-search-text">Best Python coaching near me</span>
+              </div>
+              <div class="s1-result-lines">
+                <div style="width:100%;"></div>
+                <div style="width:80%;"></div>
+                <div style="width:60%;"></div>
+                <div style="width:90%;"></div>
+                <div style="width:70%;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 2 — SEARCH RESULTS ═══ -->
+    <div class="scene" id="s2">
+      <div class="sbadge">🔍 Scene 2 — Search Results</div>
+      <!-- Cards positioned absolutely, animated by JS -->
+      <!-- Tapping character -->
+      <div class="char" style="bottom:10%;right:12%;animation:tap-anim 0.5s ease-in-out infinite;">
+        <div class="char-head">
+          <div class="eye l"></div>
+          <div class="eye r"></div>
+          <div class="mouth open"></div>
+        </div>
+        <div class="char-body" style="background:#e74c3c;"></div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 3 — WHATSAPP OUTREACH ═══ -->
+    <div class="scene" id="s3">
+      <div class="sbadge">📨 Scene 3 — WhatsApp Outreach</div>
+      <div class="wa-hdr">
+        <div class="wa-avatar">💬</div>
+        <div>
+          <div class="wa-name">WhatsApp Messages</div>
+          <div class="wa-online">Sending to institutes…</div>
+        </div>
+      </div>
+      <div class="s3-body" id="s3-body"></div>
+    </div>
+
+    <!-- ═══ SCENE 4 — NO RESPONSE ═══ -->
+    <div class="scene" id="s4">
+      <div class="sbadge">😕 Scene 4 — No Response</div>
+      <div class="wa-hdr">
+        <div class="wa-avatar">⏳</div>
+        <div>
+          <div class="wa-name">Waiting for replies…</div>
+          <div class="wa-online" style="color:#ff9999;">No response yet</div>
+        </div>
+      </div>
+      <div class="s4-body" id="s4-body"></div>
+      <div class="s4-typing" id="s4-typing">
+        <div class="tdot"></div>
+        <div class="tdot"></div>
+        <div class="tdot"></div>
+        <span style="font-size:11px;color:#888;margin-left:4px;">typing…</span>
+      </div>
+      <div class="s4-char">
+        <div class="s4-char-inner">
+          <div class="char">
+            <div class="char-head">
+              <div class="eye l" style="width:5px;height:5px;"></div>
+              <div class="eye r" style="width:5px;height:5px;"></div>
+              <div class="eyebrow l worried"></div>
+              <div class="eyebrow r worried"></div>
+              <div class="mouth sad"></div>
+            </div>
+            <div class="char-body" style="background:#e74c3c;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 5 — INSTANT REPLIES ═══ -->
+    <div class="scene" id="s5">
+      <div class="sbadge">⚡ Scene 5 — Instant Replies!</div>
+      <div class="wa-hdr" style="background:linear-gradient(135deg,#25d366,#128c7e);">
+        <div class="wa-avatar" style="background:rgba(255,255,255,0.25);">🎉</div>
+        <div>
+          <div class="wa-name">New Messages!</div>
+          <div class="wa-online">2 institutes responded instantly</div>
+        </div>
+      </div>
+      <div class="s5-body" id="s5-body"></div>
+      <div class="s5-char">
+        <div class="char" style="animation:bob 0.8s ease-in-out infinite;">
+          <div class="char-head">
+            <div class="eye l" style="width:9px;height:9px;"></div>
+            <div class="eye r" style="width:9px;height:9px;"></div>
+            <div class="mouth open" style="width:20px;height:14px;background:#c07050;"></div>
+          </div>
+          <div class="char-body" style="background:#e74c3c;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 6 — SMOOTH CONVERSATION ═══ -->
+    <div class="scene" id="s6">
+      <div class="sbadge">💬 Scene 6 — Smooth Conversation</div>
+      <div class="wa-hdr">
+        <div class="wa-avatar">🎓</div>
+        <div>
+          <div class="wa-name">TechNest Institute</div>
+          <div class="wa-online">Online</div>
+        </div>
+      </div>
+      <div class="s6-chat" id="s6-chat"></div>
+      <div class="s6-tags" id="s6-tags"></div>
+    </div>
+
+    <!-- ═══ SCENE 7 — DECISION MOMENT ═══ -->
+    <div class="scene" id="s7">
+      <div class="sbadge">✅ Scene 7 — Decision Moment</div>
+      <div class="s7-glow-ring"></div>
+      <div class="s7-glow-ring"></div>
+      <div class="s7-glow-ring"></div>
+      <div class="s7-phone-wrap">
+        <div class="s7-phone-body">
+          <div class="s7-phone-screen">
+            <div class="wa-hdr" style="height:44px;font-size:13px;">
+              <div class="wa-avatar" style="width:30px;height:30px;font-size:14px;">🎓</div>
+              <div>
+                <div class="wa-name" style="font-size:13px;">TechNest Institute</div>
+              </div>
+            </div>
+            <div class="s7-chat-area" id="s7-chat"></div>
+          </div>
+        </div>
+        <div class="s7-check" id="s7-check">✅</div>
+      </div>
+      <div id="s7-confetti"></div>
+    </div>
+
+    <!-- ═══ SCENE 8 — CONTRAST ═══ -->
+    <div class="scene" id="s8">
+      <div class="s8-left">
+        <div class="s8-left-label">❌ Silent Institutes</div>
+        <div class="sleep-card">🏫<span class="zzz">💤</span></div>
+        <div class="sleep-card">📚<span class="zzz">💤</span></div>
+        <div class="sleep-card">🖥️<span class="zzz">💤</span></div>
+        <div style="font-family:'Nunito',sans-serif;font-size:11px;color:#555;background:rgba(255,255,255,0.05);padding:4px 12px;border-radius:20px;margin-top:4px;">No reply 😴 Losing leads</div>
+      </div>
+      <div class="s8-divider"></div>
+      <div class="s8-right">
+        <div class="s8-right-label">✅ InquiAI Powered</div>
+        <div class="active-inst">🤖</div>
+        <div class="active-bbl">Hi! 👋 How can I help you today?</div>
+        <div class="active-bbl">We offer Python, Data Science & more! 🐍</div>
+        <div class="active-bbl" style="animation-delay:0.9s;">Ready to enroll? 🚀 Tap here!</div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 9 — AI PRESENCE ═══ -->
+    <div class="scene" id="s9">
+      <div class="s9-rings">
+        <div class="s9-ring"></div>
+        <div class="s9-ring"></div>
+        <div class="s9-ring"></div>
+      </div>
+      <div class="s9-center">
+        <div class="s9-icon">🤖</div>
+        <div class="s9-label">AI Admission Assistant</div>
+        <div class="s9-sub">Responds Instantly · 24×7 · On WhatsApp</div>
+      </div>
+    </div>
+
+    <!-- ═══ SCENE 10 — FINAL FRAME ═══ -->
+    <div class="scene" id="s10">
+      <div class="sbadge">🎉 Scene 10 — And They Chose Well</div>
+      <div class="s10-shelf">
+        <div class="book" style="background:#e74c3c;"></div>
+        <div class="book" style="background:#3498db;"></div>
+        <div class="book" style="background:#2ecc71;"></div>
+        <div class="book" style="background:#f39c12;height:24px;"></div>
+        <div class="book" style="background:#9b59b6;"></div>
+      </div>
+      <div class="s10-window"></div>
+      <div class="s10-desk"></div>
+      <div class="s10-laptop">
+        <div class="s10-laptop-screen">
+          <div class="s10-laptop-content">
+            <div style="font-family:'Fredoka One',cursive;font-size:26px;background:linear-gradient(135deg,#6366f1,#a78bfa);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;">InquiAI</div>
+            <div style="color:#4fc3f7;font-size:13px;font-family:'Nunito',sans-serif;font-weight:700;margin-top:4px;">Enrollment Confirmed ✅</div>
+            <div style="font-size:32px;margin-top:8px;">🎉</div>
+            <div style="font-size:10px;color:#888;margin-top:4px;font-family:'Nunito',sans-serif;">Python Full Stack</div>
+          </div>
+        </div>
+        <div class="s10-laptop-hinge"></div>
+      </div>
+      <!-- Happy student -->
+      <div class="s10-char">
+        <div class="s10-char-inner">
+          <div class="char">
+            <div class="char-head" style="width:56px;height:56px;">
+              <div class="eye l" style="width:8px;height:8px;"></div>
+              <div class="eye r" style="width:8px;height:8px;"></div>
+              <div class="mouth" style="width:22px;border-bottom-width:3px;"></div>
+            </div>
+            <div class="char-body" style="background:#e74c3c;width:46px;height:62px;"></div>
+          </div>
+        </div>
+      </div>
+      <div class="s10-endcard">
+        <div class="s10-logo">Inqui<span style="background:linear-gradient(135deg,#6366f1,#a78bfa);-webkit-background-clip:text;background-clip:text;">AI</span></div>
+        <div class="s10-tagline">"Students don't wait."</div>
+        <div class="s10-url">inquiai.in</div>
+      </div>
+    </div>
+
+  </div><!-- /stage -->
+
+  <div id="prog-wrap"><div id="prog-bar"></div></div>
+  <div id="hud">
+    <div id="scene-info">Scene 1 of 10 · Night Intent</div>
+    <div id="ctrls">
+      <button class="cbtn" id="btn-restart">⟳</button>
+      <button class="cbtn" id="btn-prev">← Prev</button>
+      <button class="cbtn primary" id="btn-play">⏸ Pause</button>
+      <button class="cbtn" id="btn-next">Next →</button>
+    </div>
+  </div>
+</div><!-- /wrapper -->
+
+<script>
+/* ═══════════════════════════════════════════════════
+   SCENE CONFIG
+═══════════════════════════════════════════════════ */
+const SCENES = [
+  { id:'s1', dur:4500, title:'Night Intent' },
+  { id:'s2', dur:4500, title:'Search Results' },
+  { id:'s3', dur:5000, title:'WhatsApp Outreach' },
+  { id:'s4', dur:6000, title:'No Response 😕' },
+  { id:'s5', dur:6000, title:'Instant Replies! ⚡' },
+  { id:'s6', dur:6000, title:'Smooth Conversation' },
+  { id:'s7', dur:5000, title:'Decision Moment ✅' },
+  { id:'s8', dur:5000, title:'Silent vs Active' },
+  { id:'s9', dur:3500, title:'AI Presence 🤖' },
+  { id:'s10', dur:5000, title:'Final Frame 🎉' },
+];
+
+const INSTITUTES = [
+  { name:'CodeCraft Academy', sub:'Python · Java · DSA', emoji:'🎓', bg:'#fff3e0', color:'#f39c12' },
+  { name:'TechNest Institute', sub:'Full Stack · AI/ML', emoji:'🏫', bg:'#e8f5e9', color:'#2ecc71' },
+  { name:'DataPro Coaching', sub:'Data Science · Python', emoji:'🖥️', bg:'#e3f2fd', color:'#3498db' },
+  { name:'BrightMind Classes', sub:'CS · Programming', emoji:'💡', bg:'#f3e5f5', color:'#9b59b6' },
+  { name:'NextGen Academy', sub:'Web Dev · Cloud', emoji:'🚀', bg:'#fce4ec', color:'#e74c3c' },
+];
+
+let cur = 0, playing = true, timer = null, progTimer = null, sceneStart = 0;
+const totalDur = SCENES.reduce((s,sc)=>s+sc.dur,0);
+
+/* ═══════════════════════════════════════════════════
+   SCENE BUILDERS
+═══════════════════════════════════════════════════ */
+function buildS1() {
+  const el = document.getElementById('s1');
+  // Remove old stars
+  el.querySelectorAll('.star').forEach(s=>s.remove());
+  for(let i=0;i<50;i++){
+    const s=document.createElement('div');
+    const sz=Math.random()*2.5+0.5;
+    s.style.cssText=`
+      position:absolute;background:white;border-radius:50%;
+      width:${sz}px;height:${sz}px;
+      top:${Math.random()*65}%;left:${Math.random()*100}%;
+      animation:twinkle ${1+Math.random()*1.5}s ${Math.random()*2}s infinite alternate;
+    `;
+    s.className='star';
+    el.appendChild(s);
+  }
+}
+
+function buildS2() {
+  const el=document.getElementById('s2');
+  el.querySelectorAll('.inst-card').forEach(c=>c.remove());
+  const positions=[
+    {top:'8%',left:'5%'},
+    {top:'24%',left:'8%'},
+    {top:'40%',left:'5%'},
+    {top:'56%',left:'9%'},
+    {top:'72%',left:'6%'},
+  ];
+  INSTITUTES.forEach((inst,i)=>{
+    const card=document.createElement('div');
+    card.className='inst-card';
+    card.style.top=positions[i].top;
+    card.style.left=positions[i].left;
+    card.style.width='52%';
+    card.innerHTML=`
+      <div class="inst-ico" style="background:${inst.bg};">${inst.emoji}</div>
+      <div>
+        <div class="inst-info-name" style="color:${inst.color};">${inst.name}</div>
+        <div class="inst-info-sub">${inst.sub}</div>
+      </div>
+      <div class="wa-chip">💬 Chat</div>
+    `;
+    el.insertBefore(card, el.querySelector('.char'));
+    setTimeout(()=>{
+      card.classList.add('slide-in');
+      // tap ring effect on card
+      setTimeout(()=>{
+        const r=document.createElement('div');
+        r.className='s2-tap-ring';
+        const rect=card.getBoundingClientRect();
+        r.style.cssText=`top:${positions[i].top};left:calc(${positions[i].left} + 50%);`;
+        el.appendChild(r);
+        setTimeout(()=>r.classList.add('burst'),10);
+        setTimeout(()=>r.remove(),600);
+      },300);
+    }, i*350+200);
+  });
+}
+
+function buildS3() {
+  const body=document.getElementById('s3-body');
+  body.innerHTML='';
+  INSTITUTES.forEach((inst,i)=>{
+    const row=document.createElement('div');
+    row.className='s3-mini';
+    row.innerHTML=`
+      <div class="s3-mini-ico" style="background:${inst.bg};">${inst.emoji}</div>
+      <div class="s3-mini-info">
+        <div class="s3-mini-name" style="color:${inst.color};">${inst.name}</div>
+        <div class="s3-mini-msg">"Hi, I want to know about your course"</div>
+      </div>
+      <div class="s3-ticks" id="t${i}">✔✔</div>
+    `;
+    body.appendChild(row);
+    setTimeout(()=>{
+      row.style.animationDelay='0s';
+      row.classList.add('appear');
+      setTimeout(()=>{
+        const ticks=document.getElementById('t'+i);
+        if(ticks) ticks.classList.add('show');
+      },400);
+    }, i*400+100);
+  });
+}
+
+function buildS4() {
+  const body=document.getElementById('s4-body');
+  body.innerHTML='';
+  const chats=[
+    {...INSTITUTES[0], status:'No reply', seen:false},
+    {...INSTITUTES[2], status:'No reply', seen:false},
+    {...INSTITUTES[3], status:'Seen ✔✔', seen:true},
+    {...INSTITUTES[4], status:'No reply', seen:false},
+  ];
+  chats.forEach((c,i)=>{
+    const row=document.createElement('div');
+    row.className='s4-mini';
+    row.innerHTML=`
+      <div class="s3-mini-ico" style="background:${c.bg};">${c.emoji}</div>
+      <div class="s3-mini-info">
+        <div class="s3-mini-name" style="color:${c.color};">${c.name}</div>
+        <div class="s3-mini-msg">"Hi, I want to know about your course"</div>
+      </div>
+      <div style="font-size:11px;color:${c.seen?'#4fc3f7':'#bbb'};font-family:'Nunito',sans-serif;font-weight:700;">${c.status}</div>
+    `;
+    body.appendChild(row);
+    setTimeout(()=>row.classList.add('appear'), i*300+100);
+  });
+  // Show typing then disappear
+  setTimeout(()=>{
+    const t=document.getElementById('s4-typing');
+    if(t) t.classList.add('show');
+  },1500);
+}
+
+function buildS5() {
+  const body=document.getElementById('s5-body');
+  body.innerHTML='';
+  const active=[
+    {inst:INSTITUTES[1], msg:'Hi! 👋 Here are our course details for you'},
+    {inst:INSTITUTES[0], msg:'We can guide you. Which course are you looking for?'},
+  ];
+  active.forEach((a,i)=>{
+    const div=document.createElement('div');
+    div.className='s5-active';
+    div.innerHTML=`
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+        <div class="s3-mini-ico" style="background:${a.inst.bg};">${a.inst.emoji}</div>
+        <div>
+          <div style="font-weight:800;font-size:14px;color:${a.inst.color};">${a.inst.name}</div>
+          <div style="font-size:10px;color:#25d366;font-weight:700;">● Online now</div>
+        </div>
+        <div style="margin-left:auto;background:#25d366;color:white;border-radius:20px;padding:3px 10px;font-size:10px;font-family:'Nunito',sans-serif;font-weight:800;">INSTANT</div>
+      </div>
+      <div style="background:#f0f0f0;border-radius:12px 12px 12px 0;padding:9px 12px;font-size:12px;font-family:'Nunito',sans-serif;font-weight:600;">${a.msg}</div>
+    `;
+    body.appendChild(div);
+    setTimeout(()=>div.style.opacity='1',i*350+100);
+  });
+}
+
+function buildS6() {
+  const chat=document.getElementById('s6-chat');
+  chat.innerHTML='';
+  const tags=document.getElementById('s6-tags');
+  tags.innerHTML='';
+
+  const messages=[
+    {type:'out',text:'What Python courses do you offer?',delay:100},
+    {type:'in',text:'We have Python Full Stack, Data Science & ML! 🐍',delay:600},
+    {type:'out',text:'What is the batch fee?',delay:1100},
+    {type:'in',text:'Starting at ₹8,999 with easy EMI options 💳',delay:1600},
+    {type:'out',text:'Is there a free demo class?',delay:2100},
+    {type:'in',text:'Yes! Free demo every Saturday 🎉 Join this week!',delay:2600},
+    {type:'out',text:'Sounds great! Send me more details 😊',delay:3100},
+  ];
+  messages.forEach(m=>{
+    const d=document.createElement('div');
+    d.className=m.type==='out'?'bbl-out':'bbl-in';
+    d.textContent=m.text;
+    chat.appendChild(d);
+    setTimeout(()=>d.classList.add('pop'),m.delay);
+  });
+
+  const courses=[
+    {label:'🐍 Python Full Stack',delay:1200},
+    {label:'📊 Data Science',delay:1450},
+    {label:'🤖 Machine Learning',delay:1700},
+    {label:'🌐 Web Development',delay:1950},
+    {label:'☁️ Cloud Computing',delay:2200},
+  ];
+  courses.forEach(c=>{
+    const t=document.createElement('div');
+    t.className='course-tag';
+    t.textContent=c.label;
+    tags.appendChild(t);
+    setTimeout(()=>t.classList.add('pop'),c.delay);
+  });
+}
+
+function buildS7() {
+  const chatArea=document.getElementById('s7-chat');
+  chatArea.innerHTML='';
+
+  // Chat messages
+  const msgs=[
+    {type:'in',text:"You're all set! Ready to enroll? 🎓",delay:300},
+    {type:'out',text:'Yes! Let\'s do this! 🚀',delay:900},
+  ];
+  msgs.forEach(m=>{
+    const d=document.createElement('div');
+    d.className=m.type==='out'?'bbl-out':'bbl-in';
+    d.textContent=m.text;
+    chatArea.appendChild(d);
+    setTimeout(()=>d.classList.add('pop'),m.delay);
+  });
+
+  // Enroll button
+  const btn=document.createElement('button');
+  btn.className='s7-enroll-btn';
+  btn.textContent='Enroll Now 🚀';
+  chatArea.appendChild(btn);
+
+  // Trigger after 2.5s
+  setTimeout(()=>{
+    btn.style.background='#10b981';
+    btn.textContent='Enrolled! 🎉';
+    document.getElementById('s7-check').classList.add('show');
+    spawnConfetti();
+  },2600);
+}
+
+function spawnConfetti() {
+  const cont=document.getElementById('s7-confetti');
+  if(!cont) return;
+  cont.innerHTML='';
+  const colors=['#6366f1','#f59e0b','#10b981','#ef4444','#a78bfa','#fcd34d','#06b6d4'];
+  for(let i=0;i<60;i++){
+    const c=document.createElement('div');
+    const sz=4+Math.random()*8;
+    const tx=(Math.random()-0.5)*500+'px';
+    const ty=-(Math.random()*320+80)+'px';
+    const r=(Math.random()*720-360)+'deg';
+    c.style.cssText=`
+      position:absolute;top:50%;left:50%;
+      width:${sz}px;height:${sz}px;
+      background:${colors[Math.floor(Math.random()*colors.length)]};
+      border-radius:${Math.random()>0.5?'50%':'3px'};
+      --tx:${tx};--ty:${ty};--r:${r};
+      opacity:1;
+      animation:confetti-fly 1.2s ${Math.random()*0.4}s ease-out forwards;
+    `;
+    cont.appendChild(c);
+  }
+}
+
+/* ═══════════════════════════════════════════════════
+   ENGINE
+═══════════════════════════════════════════════════ */
+function activate(idx) {
+  document.querySelectorAll('.scene').forEach(s=>s.classList.remove('active'));
+  const sc=SCENES[idx];
+  document.getElementById(sc.id).classList.add('active');
+  document.getElementById('scene-info').textContent=`Scene ${idx+1} of ${SCENES.length} · ${sc.title}`;
+  document.getElementById('btn-play').textContent=playing?'⏸ Pause':'▶ Play';
+
+  // Scene-specific builders
+  if(idx===0) buildS1();
+  if(idx===1) setTimeout(buildS2,50);
+  if(idx===2) setTimeout(buildS3,50);
+  if(idx===3) setTimeout(buildS4,50);
+  if(idx===4) setTimeout(buildS5,50);
+  if(idx===5) setTimeout(buildS6,50);
+  if(idx===6) setTimeout(buildS7,50);
+}
+
+function startProg() {
+  clearInterval(progTimer);
+  const bar=document.getElementById('prog-bar');
+  const basePct=SCENES.slice(0,cur).reduce((s,sc)=>s+sc.dur,0)/totalDur*100;
+  const span=SCENES[cur].dur/totalDur*100;
+  sceneStart=Date.now();
+  progTimer=setInterval(()=>{
+    const pct=basePct+Math.min(1,(Date.now()-sceneStart)/SCENES[cur].dur)*span;
+    bar.style.width=pct+'%';
+  },60);
+}
+
+function schedNext() {
+  clearTimeout(timer);
+  if(!playing) return;
+  timer=setTimeout(()=>{
+    if(cur<SCENES.length-1){
+      cur++;
+      activate(cur);
+      startProg();
+      schedNext();
+    } else {
+      playing=false;
+      document.getElementById('btn-play').textContent='▶ Replay';
+      clearInterval(progTimer);
+    }
+  },SCENES[cur].dur);
+}
+
+// Controls
+document.getElementById('btn-play').addEventListener('click',()=>{
+  if(!playing && cur===SCENES.length-1){
+    // replay
+    cur=0; playing=true;
+    document.getElementById('prog-bar').style.width='0%';
+    activate(0); startProg(); schedNext();
+    document.getElementById('btn-play').textContent='⏸ Pause';
+    return;
+  }
+  playing=!playing;
+  document.getElementById('btn-play').textContent=playing?'⏸ Pause':'▶ Play';
+  if(playing){ schedNext(); startProg(); }
+  else { clearTimeout(timer); clearInterval(progTimer); }
+});
+document.getElementById('btn-next').addEventListener('click',()=>{
+  if(cur<SCENES.length-1){
+    clearTimeout(timer); cur++;
+    activate(cur); startProg();
+    if(playing) schedNext();
+  }
+});
+document.getElementById('btn-prev').addEventListener('click',()=>{
+  if(cur>0){
+    clearTimeout(timer); cur--;
+    activate(cur); startProg();
+    if(playing) schedNext();
+  }
+});
+document.getElementById('btn-restart').addEventListener('click',()=>{
+  clearTimeout(timer); clearInterval(progTimer);
+  cur=0; playing=true;
+  document.getElementById('prog-bar').style.width='0%';
+  document.getElementById('btn-play').textContent='⏸ Pause';
+  activate(0); startProg(); schedNext();
+});
+
+// Click on progress bar to seek
+document.getElementById('prog-wrap').addEventListener('click',e=>{
+  const rect=e.currentTarget.getBoundingClientRect();
+  const pct=(e.clientX-rect.left)/rect.width;
+  let elapsed=0;
+  for(let i=0;i<SCENES.length;i++){
+    elapsed+=SCENES[i].dur;
+    if(elapsed/totalDur>=pct){
+      clearTimeout(timer); cur=i;
+      activate(cur); startProg();
+      if(playing) schedNext();
+      break;
+    }
+  }
+});
+
+// Init
+activate(0);
+startProg();
+schedNext();
+</script>
+</body>
+</html>

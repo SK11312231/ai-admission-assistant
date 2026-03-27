@@ -109,13 +109,22 @@ function isTrialExpired(createdAt: string): boolean {
   return getTrialDaysLeft(createdAt) === 0;
 }
 
-// Format phone number for display — strips @lid/@c.us, adds + prefix
+// Format phone number for display — strips @lid/@c.us, formats nicely
 function formatPhone(raw: string): string {
+  const isLid = raw.endsWith('@lid');
   const clean = raw.replace(/@c\.us$/, '').replace(/@lid$/, '').replace(/\D/g, '');
   if (!clean) return raw;
+
+  // @lid numbers are WhatsApp internal IDs (14+ digits), not real phone numbers
+  // Display them as shortened WhatsApp IDs
+  if (isLid || clean.length > 13) {
+    return `WA #${clean.slice(-6)}`;
+  }
+
   // Indian numbers: 10 digits or 12 digits starting with 91
   if (clean.length === 12 && clean.startsWith('91')) return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
   if (clean.length === 10 && /^[6-9]/.test(clean)) return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+  // Other international numbers
   return `+${clean}`;
 }
 

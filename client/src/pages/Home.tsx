@@ -177,6 +177,50 @@ export default function Home() {
         </div>
       </section>
 
+      {/* ── See It In Action ─────────────────────────────────────────────────── */}
+      <section className="py-20 px-4 bg-[#08080f]">
+        <div className="max-w-5xl mx-auto">
+          {/* Heading */}
+          <div className="text-center mb-10">
+            <span className="inline-block bg-indigo-500/20 text-indigo-300 text-xs font-semibold px-3 py-1 rounded-full mb-4 tracking-wide uppercase border border-indigo-500/30">
+              🎬 Watch It Live
+            </span>
+            <h2 className="text-3xl sm:text-4xl font-extrabold text-white mb-3">
+              See InquiAI In Action
+            </h2>
+            <p className="text-gray-400 max-w-xl mx-auto text-base">
+              A student searches for a course at night. Most institutes don't reply.
+              The one powered by InquiAI responds instantly — and wins the admission.
+            </p>
+          </div>
+
+          {/* Animation iframe */}
+          <div className="relative rounded-2xl overflow-hidden shadow-[0_0_80px_rgba(99,102,241,0.25)] border border-white/10">
+            <iframe
+              src="/brand-animation.html"
+              title="InquiAI Brand Animation"
+              className="w-full"
+              style={{ height: 'clamp(280px, 54vw, 620px)', border: 'none', display: 'block' }}
+              loading="lazy"
+              allow="autoplay"
+            />
+          </div>
+
+          {/* CTA below animation */}
+          <div className="mt-8 flex flex-col sm:flex-row gap-4 justify-center">
+            <Link to="/register"
+              className="bg-indigo-600 text-white font-semibold px-8 py-3 rounded-xl hover:bg-indigo-700 transition-colors text-sm text-center">
+              Start Free Trial — No Credit Card →
+            </Link>
+            <button
+              onClick={() => { setShowSchedule(true); setSchedSuccess(false); setSchedError(''); setSchedForm({ name: '', institute: '', size: '', mobile: '', pilot: true }); }}
+              className="border border-white/20 text-gray-300 font-semibold px-8 py-3 rounded-xl hover:bg-white/5 transition-colors text-sm">
+              📞 Schedule a Free Demo
+            </button>
+          </div>
+        </div>
+      </section>
+
       {/* How It Works */}
       <section className="py-20 px-4 bg-white">
         <div className="max-w-4xl mx-auto">
