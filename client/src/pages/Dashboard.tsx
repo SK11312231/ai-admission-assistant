@@ -3,7 +3,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
 } from 'recharts';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import { apiUrl } from '../lib/api';
 import TrainingSection from '../components/TrainingSection';
 import PremiumSection from '../components/PremiumSection';
@@ -142,6 +142,7 @@ function formatFollowUp(date: string | null): string {
 
 export default function Dashboard() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
   const [institute, setInstitute] = useState<Institute | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(false); // mobile sidebar drawer
   const [profileCompleteness, setProfileCompleteness] = useState<{
@@ -151,6 +152,16 @@ export default function Dashboard() {
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<string>('all');
   const [activeTab, setActiveTab] = useState<Tab>('leads');
+
+  // Verification state (Basic Info tab)
+  const [emailVerifySending, setEmailVerifySending] = useState(false);
+  const [emailVerifyMsg, setEmailVerifyMsg] = useState<string | null>(null);
+  const [showOtpModal, setShowOtpModal] = useState(false);
+  const [otpSending, setOtpSending] = useState(false);
+  const [otpValue, setOtpValue] = useState(['', '', '', '', '', '']);
+  const [otpVerifying, setOtpVerifying] = useState(false);
+  const [otpError, setOtpError] = useState<string | null>(null);
+  const [otpCooldown, setOtpCooldown] = useState(0);
 
   // WhatsApp
   const [showQRModal, setShowQRModal] = useState(false);
@@ -258,6 +269,14 @@ export default function Dashboard() {
     }
 
     setInstitute(inst);
+
+    // Read ?tab= from URL (e.g. after payment redirect: /dashboard?tab=profile)
+    const tabParam = searchParams.get('tab') as Tab | null;
+    if (tabParam) {
+      setActiveTab(tabParam);
+      // If redirected to profile tab, open basic section
+      if (tabParam === 'profile') setProfileSection('basic');
+    }
 
     void (async () => {
       // Always verify actual WA status from server — never trust localStorage alone
@@ -558,6 +577,74 @@ setShowQRModal(true);
     setProfileSection(section);
     void loadProfileSectionData(section);
     setBasicMsg(null); setHoursMsg(null); setNotifMsg(null); setPwMsg(null);
+  };
+
+  // ── OTP cooldown timer ───────────────────────────────────────────────────────
+  useEffect(() => {
+    if (otpCooldown <= 0) return;
+    const t = setInterval(() => setOtpCooldown(c => c - 1), 1000);
+    return () => clearInterval(t);
+  }, [otpCooldown]);
+
+  // ── Email verification — send magic link ─────────────────────────────────────
+  const handleSendEmailVerification = async () => {
+    if (!institute) return;
+    setEmailVerifySending(true); setEmailVerifyMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/resend-verification-email`), { method: 'POST' });
+      const data = await res.json() as { success?: boolean; already_verified?: boolean };
+      if (data.already_verified) {
+        const updated = { ...institute, email_verified: true };
+        setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+        setEmailVerifyMsg('already_verified');
+      } else {
+        setEmailVerifyMsg('sent');
+      }
+    } catch { setEmailVerifyMsg('error'); }
+    finally { setEmailVerifySending(false); }
+  };
+
+  // ── Phone OTP — send via SMS ─────────────────────────────────────────────────
+  const handleSendPhoneOTP = async () => {
+    if (!institute) return;
+    setOtpSending(true); setOtpError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/send-phone-otp`), { method: 'POST' });
+      const data = await res.json() as { success?: boolean; already_verified?: boolean; error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed to send OTP.');
+      if (data.already_verified) {
+        const updated = { ...institute, phone_verified: true };
+        setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+        return;
+      }
+      setOtpCooldown(60); setShowOtpModal(true);
+    } catch (err) {
+      setOtpError(err instanceof Error ? err.message : 'Failed to send OTP.');
+    } finally { setOtpSending(false); }
+  };
+
+  // ── Phone OTP — verify ───────────────────────────────────────────────────────
+  const handleVerifyOTP = async (code?: string) => {
+    if (!institute) return;
+    const otp = code ?? otpValue.join('');
+    if (otp.length !== 6) { setOtpError('Please enter the 6-digit OTP.'); return; }
+    setOtpVerifying(true); setOtpError(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/verify-phone-otp`), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ otp }),
+      });
+      const data = await res.json() as { success?: boolean; error?: string; institute?: Record<string, unknown> };
+      if (!res.ok) {
+        setOtpError(data.error ?? 'Incorrect OTP.');
+        setOtpValue(['', '', '', '', '', '']);
+        return;
+      }
+      const updated = { ...institute, phone_verified: true };
+      setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+      setShowOtpModal(false); setOtpValue(['', '', '', '', '', '']);
+    } catch { setOtpError('Verification failed. Please try again.'); }
+    finally { setOtpVerifying(false); }
   };
 
   // ── Basic info save ──────────────────────────────────────────────────────────
@@ -920,6 +1007,65 @@ setShowQRModal(true);
         />
       )}
       {/* ─────────────────────── MODALS (unchanged) ──────────────────────────── */}
+
+      {/* Phone OTP Verification Modal */}
+      {showOtpModal && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4"
+          onClick={e => { if (e.target === e.currentTarget) setShowOtpModal(false); }}>
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-sm p-6">
+            <div className="text-center mb-5">
+              <div className="w-14 h-14 bg-green-50 rounded-full flex items-center justify-center text-2xl mx-auto mb-3">📱</div>
+              <h2 className="text-lg font-bold text-gray-900">Verify WhatsApp Number</h2>
+              <p className="text-sm text-gray-500 mt-1">
+                Enter the 6-digit OTP sent via SMS to <strong>{institute?.whatsapp_number}</strong>
+              </p>
+            </div>
+
+            {otpError && (
+              <div className="bg-red-50 border border-red-200 text-red-600 text-sm rounded-xl px-4 py-2.5 mb-4 text-center">
+                {otpError}
+              </div>
+            )}
+
+            {/* 6 OTP boxes */}
+            <div className="flex justify-center gap-2 mb-5">
+              {otpValue.map((digit, i) => (
+                <input key={i} type="text" inputMode="numeric" maxLength={1} value={digit}
+                  ref={el => { if (el) el.dataset.idx = String(i); }}
+                  onChange={e => {
+                    if (!/^\d*$/.test(e.target.value)) return;
+                    const next = [...otpValue]; next[i] = e.target.value.slice(-1); setOtpValue(next); setOtpError(null);
+                    if (e.target.value && i < 5) (e.target.nextElementSibling as HTMLInputElement)?.focus();
+                    if (next.every(d => d !== '')) void handleVerifyOTP(next.join(''));
+                  }}
+                  onKeyDown={e => { if (e.key === 'Backspace' && !digit && i > 0) (e.currentTarget.previousElementSibling as HTMLInputElement)?.focus(); }}
+                  className={`w-11 h-13 text-center text-xl font-bold border-2 rounded-xl focus:outline-none focus:ring-2 focus:ring-indigo-500 transition-colors py-2 ${digit ? 'border-indigo-400 bg-indigo-50' : 'border-gray-300'} ${otpError ? 'border-red-400 bg-red-50' : ''}`}
+                />
+              ))}
+            </div>
+
+            <button onClick={() => void handleVerifyOTP()} disabled={otpVerifying || otpValue.join('').length < 6}
+              className="w-full bg-indigo-600 text-white font-semibold py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors text-sm mb-3">
+              {otpVerifying ? (
+                <span className="flex items-center justify-center gap-2">
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />Verifying…
+                </span>
+              ) : '✅ Verify'}
+            </button>
+
+            <div className="flex items-center justify-between">
+              <button onClick={() => void handleSendPhoneOTP()} disabled={otpSending || otpCooldown > 0}
+                className="text-xs text-indigo-600 hover:underline disabled:text-gray-400 disabled:no-underline">
+                {otpSending ? 'Sending…' : otpCooldown > 0 ? `Resend in ${otpCooldown}s` : '🔁 Resend OTP'}
+              </button>
+              <button onClick={() => { setShowOtpModal(false); setOtpValue(['','','','','','']); setOtpError(null); }}
+                className="text-xs text-gray-400 hover:text-gray-600">
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* QR Modal */}
       {showQRModal && (
@@ -2108,17 +2254,56 @@ setShowQRModal(true);
                       className="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
                   </div>
                 ))}
-                {/* Read-only fields */}
+                {/* Read-only fields with verify buttons */}
                 {[
-                  { label: 'Email Address', value: institute.email },
-                  { label: 'WhatsApp Number', value: institute.whatsapp_number },
+                  {
+                    label: 'Email Address',
+                    value: institute.email,
+                    verified: institute.email_verified,
+                    onVerify: handleSendEmailVerification,
+                    verifying: emailVerifySending,
+                    type: 'email',
+                  },
+                  {
+                    label: 'WhatsApp Number',
+                    value: institute.whatsapp_number,
+                    verified: institute.phone_verified,
+                    onVerify: handleSendPhoneOTP,
+                    verifying: otpSending,
+                    type: 'phone',
+                  },
                 ].map(f => (
                   <div key={f.label}>
                     <label className="block text-sm font-medium text-gray-700 mb-1">{f.label}</label>
-                    <div className="w-full text-sm border border-gray-200 bg-gray-50 rounded-xl px-3 py-2.5 text-gray-500 flex items-center justify-between">
-                      <span>{f.value}</span>
-                      <span className="text-xs text-gray-400 ml-2">Contact support to change</span>
+                    <div className="w-full text-sm border border-gray-200 bg-gray-50 rounded-xl px-3 py-2.5 flex items-center justify-between gap-2">
+                      <span className="text-gray-700 truncate">{f.value}</span>
+                      <div className="flex items-center gap-2 flex-shrink-0">
+                        {f.verified ? (
+                          <span className="flex items-center gap-1 text-xs font-semibold text-green-600 bg-green-50 border border-green-200 px-2 py-0.5 rounded-full">
+                            <svg width="10" height="10" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>
+                            Verified
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => void f.onVerify()}
+                            disabled={f.verifying}
+                            className="text-xs font-semibold text-indigo-600 border border-indigo-300 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors disabled:opacity-50">
+                            {f.verifying ? 'Sending…' : f.type === 'email' ? '📧 Verify Email' : '📱 Verify via SMS'}
+                          </button>
+                        )}
+                      </div>
                     </div>
+                    {/* Email verify feedback */}
+                    {f.type === 'email' && emailVerifyMsg === 'sent' && (
+                      <p className="text-xs text-green-600 mt-1">✅ Verification link sent to {f.value}. Check your inbox.</p>
+                    )}
+                    {f.type === 'email' && emailVerifyMsg === 'error' && (
+                      <p className="text-xs text-red-500 mt-1">Failed to send. Please try again.</p>
+                    )}
+                    {/* Phone OTP error */}
+                    {f.type === 'phone' && otpError && !showOtpModal && (
+                      <p className="text-xs text-red-500 mt-1">{otpError}</p>
+                    )}
                   </div>
                 ))}
                 <div className="flex justify-end pt-2">
