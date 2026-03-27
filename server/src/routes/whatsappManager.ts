@@ -303,6 +303,20 @@ export async function getAIReply(
 ): Promise<string | null> {
   console.log(`[WA] getAIReply START — institute ${instituteId}`);
   try {
+																																		   
+																		 
+										
+																			   
+			
+																	   
+				
+											  
+	  
+									 
+																						
+				  
+	 
+
     // ── Plan limit check ──────────────────────────────────────────────────────
     const plan = await getInstitutePlan(instituteId);
     const limitCheck = await checkAndIncrementAIResponse(instituteId, plan);
@@ -399,15 +413,26 @@ function makeClient(instituteId: string): Client {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
+        '--disable-dev-shm-usage',          // Critical for Railway — uses /dev/shm by default
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
+        '--no-zygote',                       // Reduces memory — don't spawn zygote process
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
-        '--disable-features=site-per-process',  // ← replaces --single-process
+        '--disable-features=site-per-process',
         '--disable-web-security',
         '--allow-running-insecure-content',
+        '--memory-pressure-off',             // Prevent Chromium killing itself under memory pressure
+        '--max-old-space-size=512',          // Cap V8 heap
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
+        '--hide-scrollbars',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--safebrowsing-disable-auto-update',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
@@ -418,22 +443,26 @@ function makeClient(instituteId: string): Client {
 
 // ── Init session ─────────────────────────────────────────────────────────────
 
-export async function initSession(instituteId: string): Promise<void> {
-  if (initLocks.has(instituteId)) {
-    console.log(`[WA] initSession skipped — already initializing ${instituteId}`);
+export async function initSession(instituteId: string, slot = 1): Promise<void> {
+  // sessionKey: slot 1 uses bare instituteId (legacy), slot 2+ uses "instituteId-slot"
+  const sessionKey = slot === 1 ? instituteId : `${instituteId}-${slot}`;
+
+  if (initLocks.has(sessionKey)) {
+    console.log(`[WA] initSession skipped — already initializing ${sessionKey}`);
     return;
   }
 
-  const existing = sessions.get(instituteId);
+  const existing = sessions.get(sessionKey);
   if (existing?.status === 'connected') return;
   if (existing?.status === 'initializing' || existing?.status === 'qr') return;
 
   // ── WhatsApp session limit check ──────────────────────────────────────────
   const plan = await getInstitutePlan(Number(instituteId));
-  // Count how many OTHER sessions this institute already has connected
-  const connectedCount = [...sessions.entries()].filter(
-    ([id, s]) => id !== instituteId && s.status === 'connected' && id.startsWith(`${instituteId}-`)
-  ).length + (sessions.get(instituteId)?.status === 'connected' ? 1 : 0);
+  // IMPORTANT: use exact regex match — startsWith("1") would incorrectly match "10", "11" etc.
+  const connectedCount = [...sessions.entries()].filter(([key, s]) => {
+    if (s.status !== 'connected') return false;
+    return key === instituteId || key.match(new RegExp(`^${instituteId}-\d+$`)) !== null;
+  }).length;
 
   const sessionCheck = await checkWhatsAppSessionLimit(Number(instituteId), plan, connectedCount);
   if (!sessionCheck.allowed) {
@@ -454,40 +483,41 @@ export async function initSession(instituteId: string): Promise<void> {
 
 
 
-  initLocks.add(instituteId);
+  initLocks.add(sessionKey);
 
-  console.log(`[WA] Initializing session for institute ${instituteId}`);
-  const client = makeClient(instituteId);
+  console.log(`[WA] Initializing session ${sessionKey}`);
+  const client = makeClient(sessionKey);
   const state: SessionState = { client, qr: null, status: 'initializing' };
-  sessions.set(instituteId, state);
+  sessions.set(sessionKey, state);
 
   let watchdogTimer: ReturnType<typeof setTimeout> | null = null;
 
   client.on('qr', (qr) => {
     state.qr = qr;
     state.status = 'qr';
-    console.log(`[WA] QR received for institute ${instituteId}`);
+    console.log(`[WA] QR received for ${sessionKey}`);
   });
 
   client.on('loading_screen', (percent, message) => {
-    console.log(`[WA] Loading institute ${instituteId}: ${percent}% — ${message}`);
+    console.log(`[WA] Loading ${sessionKey}: ${percent}% — ${message}`);
   });
 
   client.on('authenticated', () => {
     if (watchdogTimer !== null) return; // guard — fires once per linked device
-    console.log(`[WA] ✅ Authenticated for institute ${instituteId} — waiting for ready...`);
+    console.log(`[WA] ✅ Authenticated ${sessionKey} — waiting for ready...`);
 
     void (client as unknown as { pupPage?: { on?: (e: string, cb: (err: Error) => void) => void } })
       .pupPage?.on?.('pageerror', (err: Error) => {
-        console.error(`[WA] Page error for institute ${instituteId}:`, err.message?.slice(0, 200));
+        console.error(`[WA] Page error ${sessionKey}:`, err.message?.slice(0, 200));
       });
 
     watchdogTimer = setTimeout(() => {
-      console.error(`[WA] ⚠️ Watchdog: ready never fired for institute ${instituteId} after 90s.`);
+      console.error(`[WA] ⚠️ Watchdog: ready never fired for ${sessionKey} after 90s.`);
       void state.client.destroy().catch(() => { /* ignore */ });
-      sessions.delete(instituteId);
-      initLocks.delete(instituteId);
-      void pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+      sessions.delete(sessionKey);
+      initLocks.delete(sessionKey);
+      void pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
+      if (slot === 1) void pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
     }, 90_000);
   });
 
@@ -495,24 +525,39 @@ export async function initSession(instituteId: string): Promise<void> {
     if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.qr = null;
     state.status = 'connected';
-    initLocks.delete(instituteId);
-    console.log(`[WA] ✅ Client READY for institute ${instituteId}`);
-    await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
+    initLocks.delete(sessionKey);
+    console.log(`[WA] ✅ Client READY for ${sessionKey}`);
+    await pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = TRUE WHERE session_key = $1`, [sessionKey]);
+    if (slot === 1) await pool.query(`UPDATE institutes SET whatsapp_connected = TRUE WHERE id = $1`, [Number(instituteId)]);
   });
 
   client.on('disconnected', async (reason) => {
     if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.status = 'disconnected';
-    initLocks.delete(instituteId);
-    console.log(`[WA] Disconnected institute ${instituteId}: ${reason}`);
-    await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+    initLocks.delete(sessionKey);
+    console.log(`[WA] Disconnected ${sessionKey}: ${reason}`);
+    await pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
+    if (slot === 1) await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+
+    // Auto-reconnect after 15s — handles Chromium crashes on Railway
+    // Only reconnect for LOGOUT (user scanned out) we do NOT reconnect.
+    // For all other reasons (network drop, crash, etc.) we try to reconnect.
+    if (reason !== 'LOGOUT') {
+      console.log(`[WA] Scheduling auto-reconnect for ${sessionKey} in 15s (reason: ${reason})...`);
+      setTimeout(() => {
+        console.log(`[WA] Auto-reconnecting ${sessionKey}...`);
+        void initSession(instituteId, slot).catch(err => {
+          console.error(`[WA] Auto-reconnect failed for ${sessionKey}:`, err);
+        });
+      }, 15_000);
+    }
   });
 
   client.on('auth_failure', (msg) => {
     if (watchdogTimer) { clearTimeout(watchdogTimer); watchdogTimer = null; }
     state.status = 'disconnected';
-    initLocks.delete(instituteId);
-    console.error(`[WA] Auth failure for institute ${instituteId}:`, msg);
+    initLocks.delete(sessionKey);
+    console.error(`[WA] Auth failure for ${sessionKey}:`, msg);
   });
 
   client.on('message', async (msg: Message) => {
@@ -543,15 +588,25 @@ export async function initSession(instituteId: string): Promise<void> {
     // If the sender is another institute in our system, skip AI reply
     // to prevent infinite AI-to-AI loop. Still save as lead for manual review.
 					
+				 
     const crossCheck = await pool.query(
+							   
       `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
+			
+											   
+							  
+				
       [phoneClean],
     );
     if (crossCheck.rows.length > 0) {
       console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
+																				 
       void saveLead(Number(instituteId), studentPhone, messageText);
       return;
     }
+
+											 
+																								 
 
 					 
 		 
@@ -574,7 +629,22 @@ export async function initSession(instituteId: string): Promise<void> {
         console.error(`[WA] GPT returned null — no reply sent. Check OPENAI_API_KEY and quota.`);
       }
     } catch (err) {
-      console.error(`[WA] Failed to send reply:`, err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // TargetCloseError = Chromium crashed / was killed by Railway container limits
+      // Mark session as disconnected and schedule reconnect
+      if (errMsg.includes('TargetCloseError') || errMsg.includes('Target closed') || errMsg.includes('Protocol error')) {
+        console.error(`[WA] Chromium crash detected on ${sessionKey} — marking disconnected and scheduling reconnect.`);
+        state.status = 'disconnected';
+        sessions.delete(sessionKey);
+        initLocks.delete(sessionKey);
+        await pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
+        if (slot === 1) await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+        setTimeout(() => {
+          void initSession(instituteId, slot).catch(e => console.error(`[WA] Crash-reconnect failed for ${sessionKey}:`, e));
+        }, 15_000);
+      } else {
+        console.error(`[WA] Failed to send reply:`, err);
+      }
     }
 
 				  
@@ -584,30 +654,56 @@ export async function initSession(instituteId: string): Promise<void> {
     await client.initialize();
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    console.error(`[WA] client.initialize() failed for institute ${instituteId}: ${msg}`);
-    sessions.delete(instituteId);
-    initLocks.delete(instituteId);
-    await pool.query(
-      `UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`,
-      [Number(instituteId)]
-    );
+    console.error(`[WA] client.initialize() failed for ${sessionKey}: ${msg}`);
+    sessions.delete(sessionKey);
+    initLocks.delete(sessionKey);
+    await pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
+    if (slot === 1) await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
   }
 }
 
 // ── Exports ──────────────────────────────────────────────────────────────────
 
-export function getSessionState(instituteId: string): { status: WAStatus; qr: string | null } {
-  const s = sessions.get(instituteId);
+export function getSessionState(instituteId: string, slot = 1): { status: WAStatus; qr: string | null } {
+  // Slot 1 uses the bare instituteId as key (legacy/default)
+  // Slot 2+ uses "instituteId-slot" format
+  const sessionKey = slot === 1 ? instituteId : `${instituteId}-${slot}`;
+  const s = sessions.get(sessionKey);
   return s ? { status: s.status, qr: s.qr } : { status: 'disconnected', qr: null };
 }
 
-export async function disconnectSession(instituteId: string): Promise<void> {
-  const s = sessions.get(instituteId);
+// Returns all active session states for an institute across all slots
+export function getAllSessionStates(instituteId: string): Array<{ slot: number; status: WAStatus; qr: string | null }> {
+  const result: Array<{ slot: number; status: WAStatus; qr: string | null }> = [];
+  // Slot 1 uses bare instituteId as key
+  const s1 = sessions.get(instituteId);
+  if (s1) result.push({ slot: 1, status: s1.status, qr: s1.qr });
+  // Slots 2+ use "instituteId-N" format — use exact regex to avoid matching other institutes
+  for (const [key, state] of sessions.entries()) {
+    const match = key.match(new RegExp(`^${instituteId}-(\\d+)$`));
+    if (match) {
+      result.push({ slot: parseInt(match[1], 10), status: state.status, qr: state.qr });
+    }
+  }
+  return result;
+}
+
+export async function disconnectSession(instituteId: string, slot = 1): Promise<void> {
+  const sessionKey = slot === 1 ? instituteId : `${instituteId}-${slot}`;
+  const s = sessions.get(sessionKey);
   if (!s) return;
   try { await s.client.destroy(); } catch { /* ignore */ }
-  sessions.delete(instituteId);
-  initLocks.delete(instituteId);
-  await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+  sessions.delete(sessionKey);
+  initLocks.delete(sessionKey);
+  // Update institute_whatsapp_numbers table for slot-specific disconnect
+  await pool.query(
+    `UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`,
+    [sessionKey],
+  );
+  // Slot 1 also updates the main institutes table for backward compatibility
+  if (slot === 1) {
+    await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+  }
 }
 
 export async function sendMessageToStudent(

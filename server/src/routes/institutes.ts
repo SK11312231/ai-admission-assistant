@@ -2,7 +2,7 @@ import { Router, Request, Response } from 'express';
 import crypto from 'crypto';
 import qrcode from 'qrcode';
 import pool from '../db';
-import { initSession, getSessionState, disconnectSession, sendOTPViaWhatsApp } from './whatsappManager';
+import { initSession, getSessionState, getAllSessionStates, disconnectSession, sendOTPViaWhatsApp } from './whatsappManager';
 import { scrapeAndEnrich, getInstituteDetails, scoreProfileCompleteness } from './instituteEnrichment';
 import { sendWelcomeEmail, sendPasswordResetEmail, sendEmailVerificationEmail } from './emailService';
 import { getLimits, getInstitutePlan } from './planLimits';
@@ -483,6 +483,182 @@ router.get('/:id/whatsapp-status', async (req: Request, res: Response) => {
   } catch (err) {
     console.error('WhatsApp status error:', err);
     res.status(500).json({ error: 'Failed to get WhatsApp status.' });
+  }
+});
+
+// ── Multi-number WhatsApp routes ──────────────────────────────────────────────
+
+// GET /api/institutes/:id/whatsapp-numbers
+// Returns all WhatsApp number slots with live session state merged in
+router.get('/:id/whatsapp-numbers', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT id, slot, phone_number, label, is_connected, session_key, created_at
+       FROM institute_whatsapp_numbers
+       WHERE institute_id = $1
+       ORDER BY slot ASC`,
+      [id],
+    );
+
+    // If table doesn't exist yet / no rows, fall back to single-number from institutes table
+    if (result.rows.length === 0) {
+      const inst = await pool.query(
+        `SELECT whatsapp_number, whatsapp_connected FROM institutes WHERE id = $1`, [id],
+      );
+      const row = inst.rows[0] as { whatsapp_number: string; whatsapp_connected: boolean } | undefined;
+      const liveState = getSessionState(String(id));
+      return res.json([{
+        id: 0, slot: 1,
+        phone_number: row?.whatsapp_number ?? null,
+        label: 'Main Number',
+        is_connected: row?.whatsapp_connected ?? false,
+        status: liveState.status === 'connected' ? 'connected' : (row?.whatsapp_connected ? 'connected' : 'disconnected'),
+      }]);
+    }
+
+    // Merge in live session state
+    const liveStates = getAllSessionStates(String(id));
+    const rows = (result.rows as Array<{
+      id: number; slot: number; phone_number: string | null;
+      label: string; is_connected: boolean; session_key: string;
+    }>).map(row => {
+      const live = liveStates.find(s => s.slot === row.slot);
+      return {
+        ...row,
+        status: live?.status ?? (row.is_connected ? 'connected' : 'disconnected'),
+      };
+    });
+
+    res.json(rows);
+  } catch (err) {
+    console.error('Get WhatsApp numbers error:', err);
+    // Table may not exist yet — return synthetic slot 1
+    try {
+      const inst = await pool.query(
+        `SELECT whatsapp_number, whatsapp_connected FROM institutes WHERE id = $1`, [id],
+      );
+      const row = inst.rows[0] as { whatsapp_number: string; whatsapp_connected: boolean } | undefined;
+      const liveState = getSessionState(String(id));
+      res.json([{
+        id: 0, slot: 1,
+        phone_number: row?.whatsapp_number ?? null,
+        label: 'Main Number',
+        is_connected: row?.whatsapp_connected ?? false,
+        status: liveState.status === 'connected' ? 'connected' : (row?.whatsapp_connected ? 'connected' : 'disconnected'),
+      }]);
+    } catch {
+      res.status(500).json({ error: 'Failed to fetch WhatsApp numbers.' });
+    }
+  }
+});
+
+// POST /api/institutes/:id/whatsapp-numbers
+// Add a new WhatsApp number slot (plan-limited)
+router.post('/:id/whatsapp-numbers', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { label } = req.body as { label?: string };
+  try {
+    const plan = await getInstitutePlan(id);
+    const limits = getLimits(plan);
+    const existing = await pool.query(
+      `SELECT COUNT(*) AS count FROM institute_whatsapp_numbers WHERE institute_id = $1`, [id],
+    );
+    const current = Number(existing.rows[0]?.count ?? 0);
+    if (limits.whatsapp_numbers !== -1 && current >= limits.whatsapp_numbers) {
+      res.status(429).json({
+        error: `Your ${plan} plan allows ${limits.whatsapp_numbers} WhatsApp number(s). Upgrade to add more.`,
+        code: 'WA_LIMIT_REACHED',
+      });
+      return;
+    }
+    const slotResult = await pool.query(
+      `SELECT COALESCE(MAX(slot), 0) + 1 AS next_slot FROM institute_whatsapp_numbers WHERE institute_id = $1`, [id],
+    );
+    const nextSlot = Number(slotResult.rows[0]?.next_slot ?? 2);
+    const sessionKey = `${id}-${nextSlot}`;
+    const insertResult = await pool.query(
+      `INSERT INTO institute_whatsapp_numbers (institute_id, slot, label, is_connected, session_key)
+       VALUES ($1, $2, $3, FALSE, $4) RETURNING *`,
+      [id, nextSlot, label?.trim() || `WhatsApp ${nextSlot}`, sessionKey],
+    );
+    res.status(201).json({ ...insertResult.rows[0], slot: nextSlot });
+  } catch (err) {
+    console.error('Add WhatsApp number error:', err);
+    res.status(500).json({ error: 'Failed to add WhatsApp number.' });
+  }
+});
+
+// POST /api/institutes/:id/whatsapp-numbers/:slot/connect
+// Start QR session for a specific slot
+router.post('/:id/whatsapp-numbers/:slot/connect', async (req: Request, res: Response) => {
+  const id = req.params.id;
+  const slot = Number(req.params.slot);
+  try {
+    void initSession(id, slot);
+    res.json({ started: true, sessionKey: `${id}-${slot}` });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : 'Failed to start WhatsApp session.';
+    res.status(400).json({ error: msg });
+  }
+});
+
+// GET /api/institutes/:id/whatsapp-numbers/:slot/status
+// QR + connection status for a specific slot
+router.get('/:id/whatsapp-numbers/:slot/status', async (req: Request, res: Response) => {
+  const id = req.params.id;
+  const slot = Number(req.params.slot);
+  try {
+    const { status, qr } = getSessionState(id, slot);
+    let qrDataUrl: string | null = null;
+    if (qr) qrDataUrl = await qrcode.toDataURL(qr, { width: 300, margin: 2 });
+    res.json({ status, qr: qrDataUrl });
+  } catch (err) {
+    console.error(`WhatsApp slot ${slot} status error:`, err);
+    res.status(500).json({ error: 'Failed to get status.' });
+  }
+});
+
+// PATCH /api/institutes/:id/whatsapp-numbers/:slot
+// Update label for a slot
+router.patch('/:id/whatsapp-numbers/:slot', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const slot = Number(req.params.slot);
+  const { label } = req.body as { label?: string };
+  if (!label?.trim()) { res.status(400).json({ error: 'Label is required.' }); return; }
+  try {
+    await pool.query(
+      `UPDATE institute_whatsapp_numbers SET label = $1 WHERE institute_id = $2 AND slot = $3`,
+      [label.trim(), id, slot],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to update label.' });
+  }
+});
+
+// DELETE /api/institutes/:id/whatsapp-numbers/:slot
+// Disconnect and remove a slot (slot 1 = disconnect only, never deleted)
+router.delete('/:id/whatsapp-numbers/:slot', async (req: Request, res: Response) => {
+  const id = req.params.id;
+  const slot = Number(req.params.slot);
+  try {
+    await disconnectSession(id, slot);
+    if (slot > 1) {
+      await pool.query(
+        `DELETE FROM institute_whatsapp_numbers WHERE institute_id = $1 AND slot = $2`,
+        [Number(id), slot],
+      );
+    } else {
+      await pool.query(
+        `UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE institute_id = $1 AND slot = 1`,
+        [Number(id)],
+      );
+    }
+    res.json({ success: true });
+  } catch (err) {
+    console.error(`Disconnect slot ${slot} error:`, err);
+    res.status(500).json({ error: 'Failed to disconnect.' });
   }
 });
 
