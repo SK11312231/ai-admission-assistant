@@ -109,6 +109,36 @@ function isTrialExpired(createdAt: string): boolean {
   return getTrialDaysLeft(createdAt) === 0;
 }
 
+// Format phone number for display — strips @lid/@c.us, formats nicely
+function formatPhone(raw: string): string {
+  const isLid = raw.endsWith('@lid');
+  const clean = raw.replace(/@c\.us$/, '').replace(/@lid$/, '').replace(/\D/g, '');
+  if (!clean) return raw;
+
+  // @lid numbers are WhatsApp internal IDs (14+ digits), not real phone numbers
+  // Display them as shortened WhatsApp IDs
+  if (isLid || clean.length > 13) {
+    return `WA #${clean.slice(-6)}`;
+  }
+
+  // Indian numbers: 10 digits or 12 digits starting with 91
+  if (clean.length === 12 && clean.startsWith('91')) return `+91 ${clean.slice(2, 7)} ${clean.slice(7)}`;
+  if (clean.length === 10 && /^[6-9]/.test(clean)) return `+91 ${clean.slice(0, 5)} ${clean.slice(5)}`;
+  // Other international numbers
+  return `+${clean}`;
+}
+
+// Format timestamp in IST
+function formatIST(raw: string): string {
+  const d = new Date(raw);
+  return d.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    day: 'numeric', month: 'short',
+    hour: '2-digit', minute: '2-digit',
+    hour12: true,
+  });
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 const STATUS_COLORS: Record<string, string> = {
@@ -229,6 +259,8 @@ export default function Dashboard() {
   const [editingNotes, setEditingNotes] = useState<Record<number, string>>({});
   const [savingNotes, setSavingNotes] = useState<Record<number, boolean>>({});
   const [savedNotes, setSavedNotes] = useState<Record<number, boolean>>({});
+  const [editingName, setEditingName] = useState<Record<number, string | null>>({}); // null = not editing, string = editing value
+  const [savingName, setSavingName] = useState<Record<number, boolean>>({});
   const [savingFollowUp, setSavingFollowUp] = useState<Record<number, boolean>>({});
   const [editingFollowUp, setEditingFollowUp] = useState<Record<number, string>>({});
   const [sendingFollowUp, setSendingFollowUp] = useState<Record<number, boolean>>({});
@@ -795,6 +827,23 @@ setShowQRModal(true);
     // Show success tick for 2s
     setSavedNotes(prev => ({ ...prev, [lead.id]: true }));
     setTimeout(() => setSavedNotes(prev => ({ ...prev, [lead.id]: false })), 2000);
+  };
+
+  const saveLeadName = async (lead: Lead) => {
+    const name = editingName[lead.id];
+    if (name === null || name === undefined) return;
+    setSavingName(prev => ({ ...prev, [lead.id]: true }));
+    try {
+      await fetch(apiUrl(`/api/leads/${lead.id}/name`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim() || null }),
+      });
+      setLeads(prev => prev.map(l => l.id === lead.id ? { ...l, student_name: name.trim() || null } : l));
+    } catch { /* silent — name stays locally updated */ }
+    finally {
+      setSavingName(prev => ({ ...prev, [lead.id]: false }));
+      setEditingName(prev => { const n = { ...prev }; delete n[lead.id]; return n; });
+    }
   };
 
   const saveFollowUp = async (lead: Lead) => {
@@ -1630,7 +1679,35 @@ setShowQRModal(true);
                         if (next !== null) void fetchConversation(lead);
                       }}>
                         <div className="flex items-center gap-2 mb-1 flex-wrap">
-                          <h3 className="font-semibold text-gray-900 text-sm">{lead.student_name ?? 'Unknown Student'}</h3>
+                          {/* Student name — double-click to edit */}
+                          {editingName[lead.id] !== undefined && editingName[lead.id] !== null ? (
+                            <div className="flex items-center gap-1" onClick={e => e.stopPropagation()}>
+                              <input
+                                autoFocus
+                                type="text"
+                                value={editingName[lead.id] as string}
+                                onChange={e => setEditingName(prev => ({ ...prev, [lead.id]: e.target.value }))}
+                                onKeyDown={e => {
+                                  if (e.key === 'Enter') void saveLeadName(lead);
+                                  if (e.key === 'Escape') setEditingName(prev => { const n = { ...prev }; delete n[lead.id]; return n; });
+                                }}
+                                onBlur={() => void saveLeadName(lead)}
+                                placeholder="Enter name…"
+                                className="text-sm font-semibold text-gray-900 border-b-2 border-indigo-400 bg-transparent focus:outline-none px-0.5 w-36"
+                              />
+                              {savingName[lead.id] && <span className="text-xs text-gray-400">Saving…</span>}
+                            </div>
+                          ) : (
+                            <h3
+                              className="font-semibold text-gray-900 text-sm cursor-pointer hover:text-indigo-600 transition-colors"
+                              title="Double-click to edit name"
+                              onDoubleClick={e => {
+                                e.stopPropagation();
+                                setEditingName(prev => ({ ...prev, [lead.id]: lead.student_name ?? '' }));
+                              }}>
+                              {lead.student_name ?? <span className="text-gray-400 italic font-normal">Unknown Student</span>}
+                            </h3>
+                          )}
                           <span className={`text-xs font-medium px-2 py-0.5 rounded-full capitalize ${STATUS_COLORS[lead.status] ?? 'bg-gray-100 text-gray-600'}`}>{lead.status}</span>
                           {followUpLabel && (
                             <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${overdue ? 'bg-red-100 text-red-600' : 'bg-purple-100 text-purple-700'}`}>
@@ -1640,8 +1717,8 @@ setShowQRModal(true);
                         </div>
                         <p className="text-sm text-gray-600 mb-1 truncate">{lead.message || <span className="italic text-gray-400">No message</span>}</p>
                         <div className="flex items-center gap-4 text-xs text-gray-400">
-                          <span>📱 {lead.student_phone}</span>
-                          <span>🕐 {new Date(lead.last_activity_at || lead.created_at).toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+                          <span>📱 {formatPhone(lead.student_phone)}</span>
+                          <span>🕐 {formatIST(lead.last_activity_at || lead.created_at)}</span>
                         </div>
                         {lead.notes && !isExpanded && (
                           <p className="text-xs text-gray-400 mt-1 italic truncate">📝 {lead.notes}</p>
