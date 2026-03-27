@@ -815,6 +815,154 @@ router.get('/:id/upgrade-request', async (req: Request, res: Response) => {
   }
 });
 
+// ── PATCH /api/institutes/:id/basic-info ──────────────────────────────────────
+// Update basic institute info (name, phone, website)
+// Email and WhatsApp number are intentionally excluded — those require verification
+
+router.patch('/:id/basic-info', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { name, phone, website } = req.body as {
+    name?: string; phone?: string; website?: string;
+  };
+
+  if (!name?.trim()) { res.status(400).json({ error: 'Institute name is required.' }); return; }
+
+  let websiteClean = website?.trim() ?? '';
+  if (websiteClean && !websiteClean.startsWith('http')) websiteClean = `https://${websiteClean}`;
+
+  try {
+    const result = await pool.query(
+      `UPDATE institutes SET name = $1, phone = $2, website = $3 WHERE id = $4
+       RETURNING id, name, email, phone, whatsapp_number, website, plan,
+                 is_paid, is_premium_accessible, email_verified, phone_verified,
+                 whatsapp_connected, created_at`,
+      [name.trim(), phone?.trim() ?? '', websiteClean, id],
+    );
+    if (result.rows.length === 0) { res.status(404).json({ error: 'Institute not found.' }); return; }
+    console.log(`[Profile] Basic info updated for institute ${id}`);
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error('Basic info update error:', err);
+    res.status(500).json({ error: 'Failed to update basic info.' });
+  }
+});
+
+// ── PATCH /api/institutes/:id/business-hours ──────────────────────────────────
+// Save business hours JSONB
+
+router.patch('/:id/business-hours', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { business_hours } = req.body as { business_hours?: Record<string, unknown> };
+  if (!business_hours || typeof business_hours !== 'object') {
+    res.status(400).json({ error: 'business_hours must be an object.' }); return;
+  }
+  try {
+    await pool.query(
+      `UPDATE institutes SET business_hours = $1 WHERE id = $2`,
+      [JSON.stringify(business_hours), id],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Business hours update error:', err);
+    res.status(500).json({ error: 'Failed to update business hours.' });
+  }
+});
+
+// ── GET /api/institutes/:id/business-hours ────────────────────────────────────
+
+router.get('/:id/business-hours', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT business_hours FROM institutes WHERE id = $1`, [id],
+    );
+    res.json({ business_hours: result.rows[0]?.business_hours ?? null });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch business hours.' });
+  }
+});
+
+// ── PATCH /api/institutes/:id/notification-preferences ───────────────────────
+
+router.patch('/:id/notification-preferences', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { notify_new_lead, notify_followup_due, notify_weekly_summary } = req.body as {
+    notify_new_lead?: boolean;
+    notify_followup_due?: boolean;
+    notify_weekly_summary?: boolean;
+  };
+  try {
+    await pool.query(
+      `UPDATE institutes
+       SET notify_new_lead = COALESCE($1, notify_new_lead),
+           notify_followup_due = COALESCE($2, notify_followup_due),
+           notify_weekly_summary = COALESCE($3, notify_weekly_summary)
+       WHERE id = $4`,
+      [
+        notify_new_lead ?? null,
+        notify_followup_due ?? null,
+        notify_weekly_summary ?? null,
+        id,
+      ],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Notification prefs update error:', err);
+    res.status(500).json({ error: 'Failed to update notification preferences.' });
+  }
+});
+
+// ── GET /api/institutes/:id/notification-preferences ─────────────────────────
+
+router.get('/:id/notification-preferences', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT notify_new_lead, notify_followup_due, notify_weekly_summary
+       FROM institutes WHERE id = $1`, [id],
+    );
+    res.json(result.rows[0] ?? {
+      notify_new_lead: true,
+      notify_followup_due: true,
+      notify_weekly_summary: false,
+    });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch notification preferences.' });
+  }
+});
+
+// ── POST /api/institutes/:id/change-password ──────────────────────────────────
+
+router.post('/:id/change-password', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { current_password, new_password } = req.body as {
+    current_password?: string; new_password?: string;
+  };
+  if (!current_password || !new_password) {
+    res.status(400).json({ error: 'Both current and new password are required.' }); return;
+  }
+  if (new_password.length < 8) {
+    res.status(400).json({ error: 'New password must be at least 8 characters.' }); return;
+  }
+  try {
+    const result = await pool.query(
+      `SELECT password_hash FROM institutes WHERE id = $1 AND is_active = TRUE`, [id],
+    );
+    const inst = result.rows[0] as { password_hash: string } | undefined;
+    if (!inst) { res.status(404).json({ error: 'Institute not found.' }); return; }
+    if (!verifyPassword(current_password, inst.password_hash)) {
+      res.status(401).json({ error: 'Current password is incorrect.' }); return;
+    }
+    const newHash = hashPassword(new_password);
+    await pool.query(`UPDATE institutes SET password_hash = $1 WHERE id = $2`, [newHash, id]);
+    console.log(`[Profile] Password changed for institute ${id}`);
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Change password error:', err);
+    res.status(500).json({ error: 'Failed to change password.' });
+  }
+});
+
 // DELETE /api/institutes/:id/disconnect-whatsapp
 router.delete('/:id/disconnect-whatsapp', async (req: Request, res: Response) => {
   const { id } = req.params;
