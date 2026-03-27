@@ -303,19 +303,19 @@ export async function getAIReply(
 ): Promise<string | null> {
   console.log(`[WA] getAIReply START — institute ${instituteId}`);
   try {
-    // ── Cross-institute guard (defense in depth) ────────────────────────────
-    // Even if called directly, never reply to another institute's number
-    const crossGuard = await pool.query(
-      `SELECT 1 FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE
-       UNION
-       SELECT 1 FROM institute_whatsapp_numbers WHERE phone_number = $1
-       LIMIT 1`,
-      [studentPhone.replace(/[\s\-\+]/g, '')],
-    );
-    if (crossGuard.rows.length > 0) {
-      console.log(`[WA] getAIReply blocked for cross-institute number ${studentPhone}`);
-      return null;
-    }
+																																		   
+																		 
+										
+																			   
+			
+																	   
+				
+											  
+	  
+									 
+																						
+				  
+	 
 
     // ── Plan limit check ──────────────────────────────────────────────────────
     const plan = await getInstitutePlan(instituteId);
@@ -413,15 +413,26 @@ function makeClient(instituteId: string): Client {
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
-        '--disable-dev-shm-usage',
+        '--disable-dev-shm-usage',          // Critical for Railway — uses /dev/shm by default
         '--disable-accelerated-2d-canvas',
         '--no-first-run',
+        '--no-zygote',                       // Reduces memory — don't spawn zygote process
         '--disable-gpu',
         '--disable-software-rasterizer',
         '--disable-extensions',
-        '--disable-features=site-per-process',  // ← replaces --single-process
+        '--disable-features=site-per-process',
         '--disable-web-security',
         '--allow-running-insecure-content',
+        '--memory-pressure-off',             // Prevent Chromium killing itself under memory pressure
+        '--max-old-space-size=512',          // Cap V8 heap
+        '--disable-background-networking',
+        '--disable-default-apps',
+        '--disable-sync',
+        '--disable-translate',
+        '--hide-scrollbars',
+        '--metrics-recording-only',
+        '--mute-audio',
+        '--safebrowsing-disable-auto-update',
       ],
       executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
       headless: true,
@@ -527,6 +538,19 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
     console.log(`[WA] Disconnected ${sessionKey}: ${reason}`);
     await pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
     if (slot === 1) await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+
+    // Auto-reconnect after 15s — handles Chromium crashes on Railway
+    // Only reconnect for LOGOUT (user scanned out) we do NOT reconnect.
+    // For all other reasons (network drop, crash, etc.) we try to reconnect.
+    if (reason !== 'LOGOUT') {
+      console.log(`[WA] Scheduling auto-reconnect for ${sessionKey} in 15s (reason: ${reason})...`);
+      setTimeout(() => {
+        console.log(`[WA] Auto-reconnecting ${sessionKey}...`);
+        void initSession(instituteId, slot).catch(err => {
+          console.error(`[WA] Auto-reconnect failed for ${sessionKey}:`, err);
+        });
+      }, 15_000);
+    }
   });
 
   client.on('auth_failure', (msg) => {
@@ -557,32 +581,32 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
     const studentPhone = msg.from.replace('@c.us', '').replace('@lid', '');
     const messageText = msg.body;
 
-											 
-																								 
+    console.log(`[WA] ===== INCOMING =====`);
+    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
 
     // ── Cross-institute loop prevention ──────────────────────────────────
-																			   
-    // Check BOTH tables: primary whatsapp_number column AND institute_whatsapp_numbers
-    // (multi-number support). If sender belongs to any institute → no reply of any kind.
-															  
+    // If the sender is another institute in our system, skip AI reply
+    // to prevent infinite AI-to-AI loop. Still save as lead for manual review.
+					
+				 
     const crossCheck = await pool.query(
-      `SELECT 1 FROM institutes
-       WHERE whatsapp_number = $1 AND is_active = TRUE
-       UNION
-       SELECT 1 FROM institute_whatsapp_numbers
-       WHERE phone_number = $1
-       LIMIT 1`,
+							   
+      `SELECT id FROM institutes WHERE whatsapp_number = $1 AND is_active = TRUE LIMIT 1`,
+			
+											   
+							  
+				
       [phoneClean],
     );
     if (crossCheck.rows.length > 0) {
-      console.log(`[WA] Cross-institute message from ${phoneClean} — no reply sent (loop prevention).`);
-      // Still save as lead so owner sees it, but absolutely no reply of any kind
+      console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
+																				 
       void saveLead(Number(instituteId), studentPhone, messageText);
       return;
     }
 
-    console.log(`[WA] ===== INCOMING =====`);
-    console.log(`[WA] Institute: ${instituteId} | From: ${studentPhone} | Text: ${messageText}`);
+											 
+																								 
 
 					 
 		 
@@ -605,7 +629,22 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
         console.error(`[WA] GPT returned null — no reply sent. Check OPENAI_API_KEY and quota.`);
       }
     } catch (err) {
-      console.error(`[WA] Failed to send reply:`, err);
+      const errMsg = err instanceof Error ? err.message : String(err);
+      // TargetCloseError = Chromium crashed / was killed by Railway container limits
+      // Mark session as disconnected and schedule reconnect
+      if (errMsg.includes('TargetCloseError') || errMsg.includes('Target closed') || errMsg.includes('Protocol error')) {
+        console.error(`[WA] Chromium crash detected on ${sessionKey} — marking disconnected and scheduling reconnect.`);
+        state.status = 'disconnected';
+        sessions.delete(sessionKey);
+        initLocks.delete(sessionKey);
+        await pool.query(`UPDATE institute_whatsapp_numbers SET is_connected = FALSE WHERE session_key = $1`, [sessionKey]);
+        if (slot === 1) await pool.query(`UPDATE institutes SET whatsapp_connected = FALSE WHERE id = $1`, [Number(instituteId)]);
+        setTimeout(() => {
+          void initSession(instituteId, slot).catch(e => console.error(`[WA] Crash-reconnect failed for ${sessionKey}:`, e));
+        }, 15_000);
+      } else {
+        console.error(`[WA] Failed to send reply:`, err);
+      }
     }
 
 				  
