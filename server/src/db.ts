@@ -439,6 +439,15 @@ export async function initDB(): Promise<void> {
   `);
   console.log('  ✅ institute_whatsapp_numbers table ready');
 
+  // ── Institute Profile Extensions ──────────────────────────────────────────
+  // Business hours (JSONB): { mon: {open:'09:00', close:'18:00', closed:false}, ... }
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS business_hours JSONB`);
+  // Notification preferences
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS notify_new_lead BOOLEAN NOT NULL DEFAULT TRUE`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS notify_followup_due BOOLEAN NOT NULL DEFAULT TRUE`);
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS notify_weekly_summary BOOLEAN NOT NULL DEFAULT FALSE`);
+  console.log('  ✅ profile extension columns ready');
+
   console.log('✅ initDB() complete — all tables ready.');
 }
 
