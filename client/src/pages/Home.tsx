@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useEffect, useState } from 'react';
 import { apiUrl } from '../lib/api';
 
@@ -106,6 +106,13 @@ const FALLBACK_PLANS: Plan[] = [
 
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function Home() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    const stored = localStorage.getItem('institute');
+    if (stored) {
+      navigate('/dashboard');
+    }
+  }, [navigate]);
   const [plans, setPlans] = useState<Plan[]>(FALLBACK_PLANS);
   const [showSchedule, setShowSchedule] = useState(false);
   const [schedForm, setSchedForm] = useState({ name: '', institute: '', size: '', mobile: '', pilot: true });

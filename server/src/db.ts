@@ -448,6 +448,29 @@ export async function initDB(): Promise<void> {
   await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS notify_weekly_summary BOOLEAN NOT NULL DEFAULT FALSE`);
   console.log('  ✅ profile extension columns ready');
 
+  // ── 18. broadcasts ────────────────────────────────────────────────────────
+  // Bulk broadcast campaigns (Pro plan feature)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS broadcasts (
+      id            SERIAL PRIMARY KEY,
+      institute_id  INTEGER NOT NULL REFERENCES institutes(id) ON DELETE CASCADE,
+      name          TEXT NOT NULL,
+      message       TEXT NOT NULL,
+      status        TEXT NOT NULL DEFAULT 'draft',
+      -- status: draft | sending | completed | failed
+      target_filter TEXT NOT NULL DEFAULT 'all',
+      -- target_filter: all | new | contacted | converted
+      total_count   INTEGER NOT NULL DEFAULT 0,
+      sent_count    INTEGER NOT NULL DEFAULT 0,
+      failed_count  INTEGER NOT NULL DEFAULT 0,
+      created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+      started_at    TIMESTAMPTZ,
+      completed_at  TIMESTAMPTZ
+    )
+  `);
+  await pool.query(`CREATE INDEX IF NOT EXISTS idx_broadcasts_institute ON broadcasts (institute_id)`);
+  console.log('  ✅ broadcasts table ready');
+
   console.log('✅ initDB() complete — all tables ready.');
 }
 
