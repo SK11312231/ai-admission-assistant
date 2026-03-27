@@ -7,15 +7,16 @@ import { checkActiveleadsLimit, getInstitutePlan, getLimits, getAIUsageThisMonth
 
 const router = Router();
 
-// ── Lazy Groq client ─────────────────────────────────────────────────────────
+// ── OpenAI client ────────────────────────────────────────────────────────────
 
 let openai: OpenAI | null = null;
 function getOpenAI(): OpenAI {
   if (!openai) {
-    if (!process.env.GROQ_API_KEY) throw new Error('GROQ_API_KEY is not set.');
+    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY is not set.');
     openai = new OpenAI({
-      apiKey: process.env.GROQ_API_KEY,
-      baseURL: 'https://api.groq.com/openai/v1',
+      apiKey: process.env.OPENAI_API_KEY,
+	  baseURL: 'https://api.groq.com/openai/v1',
+												
     });
   }
   return openai;
@@ -29,13 +30,13 @@ async function ensureLeadColumns(): Promise<void> {
   await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS last_activity_at TIMESTAMPTZ DEFAULT NOW()`);
 }
 
-// ── Auto-extract student name from message using Groq ────────────────────────
+// ── Auto-extract student name from message using OpenAI ──────────────────────
 
 async function extractStudentName(message: string): Promise<string | null> {
   try {
     const client = getOpenAI();
     const completion = await client.chat.completions.create({
-      model: 'llama-3.3-70b-versatile',
+      model: 'gpt-4o-mini',
       messages: [
         {
           role: 'system',
@@ -488,14 +489,6 @@ export async function createLeadFromWhatsApp(
       console.log(`[Leads] Institute ${instituteId} hit active leads cap (${limitCheck.used}/${limitCheck.limit}) — lead not saved for ${studentPhone}`);
       return; // Silently skip — AI will still reply, just won't save as lead
     }
-
-
-
-
-
-
-
-
 
     // New lead — try to extract name from first message
     const studentName = await extractStudentName(message);
