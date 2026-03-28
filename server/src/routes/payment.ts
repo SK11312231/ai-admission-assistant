@@ -229,7 +229,7 @@ router.post('/verify', async (req: Request, res: Response) => {
     // is_premium_accessible only set for Growth/Pro — Starter never gets premium features
     const isPremiumPlan = ['growth', 'pro'].includes(payment.plan);
     await pool.query(
-      'UPDATE institutes SET plan = $1, is_paid = TRUE, is_premium_accessible = $2 WHERE id = $3',
+      'UPDATE institutes SET plan = $1, is_paid = TRUE, is_premium_accessible = $2, pro_onboarded = FALSE WHERE id = $3',
       [payment.plan, isPremiumPlan, institute_id],
     );
 

@@ -53,6 +53,7 @@ interface Institute {
   created_at: string;
   subscription_billing_cycle?: string | null;
   subscription_expires_at?: string | null;
+  pro_onboarded?: boolean;
 }
 
 interface Lead {
@@ -218,7 +219,7 @@ export default function Dashboard() {
   const [profileMsg, setProfileMsg] = useState<string | null>(null);
   const [reEnriching, setReEnriching] = useState(false);
   // Profile section sub-tab
-  const [profileSection, setProfileSection] = useState<'basic' | 'details' | 'hours' | 'password' | 'notifications'>('basic');
+  const [profileSection, setProfileSection] = useState<'basic' | 'details' | 'hours' | 'password' | 'notifications' | 'persona' | 'invoices'>('basic');
   // Basic info form
   const [basicForm, setBasicForm] = useState({ name: '', phone: '', website: '' });
   const [basicSaving, setBasicSaving] = useState(false);
@@ -236,6 +237,19 @@ export default function Dashboard() {
   const [pwForm, setPwForm] = useState({ current: '', next: '', confirm: '' });
   const [pwSaving, setPwSaving] = useState(false);
   const [pwMsg, setPwMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // AI Persona (Pro)
+  const [personaForm, setPersonaForm] = useState({ persona_name: '', persona_tone: 'friendly', language_style: 'english' });
+  const [personaSaving, setPersonaSaving] = useState(false);
+  const [personaMsg, setPersonaMsg] = useState<string | null>(null);
+  // Invoice history
+  const [invoices, setInvoices] = useState<Array<{
+    id: number; plan: string; billing_cycle: string; amount_inr: number;
+    razorpay_payment_id: string; paid_at: string; subscription_expires_at: string | null;
+  }>>([]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+  // Pro onboarding modal
+  const [showOnboarding, setShowOnboarding] = useState(false);
+  const [onboardingStep, setOnboardingStep] = useState(0);
 
   // ── Analytics state ─────────────────────────────────────────────────────────
   const [analyticsOverview, setAnalyticsOverview] = useState<AnalyticsOverview | null>(null);
@@ -325,6 +339,11 @@ export default function Dashboard() {
       setActiveTab(tabParam);
       // If redirected to profile tab, open basic section
       if (tabParam === 'profile') setProfileSection('basic');
+
+    // Show Pro onboarding modal if Pro and not yet onboarded
+    if (inst.plan === 'pro' && inst.is_paid && inst.pro_onboarded === false) {
+      setTimeout(() => setShowOnboarding(true), 800);
+    }
     }
 
     void (async () => {
@@ -620,6 +639,8 @@ setShowQRModal(true);
         if (res.ok) setNotifPrefs(await res.json() as typeof notifPrefs);
       } catch { /* use defaults */ }
     }
+    if (section === 'persona') void loadPersona();
+    if (section === 'invoices') void loadInvoices();
   };
 
   const handleProfileSectionChange = (section: typeof profileSection) => {
@@ -728,7 +749,58 @@ setShowQRModal(true);
     finally { setPwSaving(false); }
   };
 
-  // ── Broadcast handlers ───────────────────────────────────────────────────────
+  // ── AI Persona handlers ──────────────────────────────────────────────────────
+  const loadPersona = async () => {
+    if (!institute) return;
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/persona`));
+      if (res.ok) {
+        const data = await res.json() as typeof personaForm;
+        setPersonaForm({
+          persona_name: data.persona_name ?? '',
+          persona_tone: data.persona_tone ?? 'friendly',
+          language_style: data.language_style ?? 'english',
+        });
+      }
+    } catch { /* use defaults */ }
+  };
+
+  const handleSavePersona = async () => {
+    if (!institute) return;
+    setPersonaSaving(true); setPersonaMsg(null);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/persona`), {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(personaForm),
+      });
+      const data = await res.json() as { error?: string };
+      if (!res.ok) throw new Error(data.error ?? 'Failed.');
+      setPersonaMsg('✅ AI persona saved. New conversations will use these settings.');
+    } catch (err) { setPersonaMsg(err instanceof Error ? err.message : 'Failed.'); }
+    finally { setPersonaSaving(false); }
+  };
+
+  // ── Invoice handlers ─────────────────────────────────────────────────────────
+  const loadInvoices = async () => {
+    if (!institute) return;
+    setInvoicesLoading(true);
+    try {
+      const res = await fetch(apiUrl(`/api/institutes/${institute.id}/invoices`));
+      if (res.ok) setInvoices(await res.json() as typeof invoices);
+    } catch { /* silent */ }
+    finally { setInvoicesLoading(false); }
+  };
+
+  // ── Pro onboarding ───────────────────────────────────────────────────────────
+  const completeOnboarding = async () => {
+    if (!institute) return;
+    try {
+      await fetch(apiUrl(`/api/institutes/${institute.id}/complete-onboarding`), { method: 'POST' });
+      const updated = { ...institute, pro_onboarded: true };
+      setInstitute(updated); localStorage.setItem('institute', JSON.stringify(updated));
+    } catch { /* silent */ }
+    setShowOnboarding(false);
+  };
   const loadBroadcasts = async () => {
     if (!institute) return;
     setBroadcastsLoading(true);
@@ -1022,7 +1094,12 @@ setShowQRModal(true);
             localStorage.setItem('institute', JSON.stringify(updated));
             setInstitute(updated);
             setUpgradeSuccess(true);
-            setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 4000);
+            // Show Pro onboarding modal for new Pro subscribers
+            if (verifyData.plan === 'pro' && !updated.pro_onboarded) {
+              setTimeout(() => { setShowUpgradeModal(false); setShowOnboarding(true); }, 1500);
+            } else {
+              setTimeout(() => { setShowUpgradeModal(false); setUpgradeSuccess(false); }, 4000);
+            }
           } catch (err) {
             setUpgradeError(err instanceof Error ? err.message : 'Payment verification failed. Contact support.');
           } finally {
@@ -1125,6 +1202,58 @@ setShowQRModal(true);
       {/* ─────────────────────── MODALS (unchanged) ──────────────────────────── */}
 
       {/* Phone OTP Modal — coming soon after DLT registration */}
+
+      {/* ── Pro Onboarding Modal ── */}
+      {showOnboarding && institute && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden">
+            {/* Header */}
+            <div style={{ background: 'linear-gradient(135deg,#4f46e5,#7c3aed)', padding: '28px 28px 20px' }}>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-white text-2xl font-bold">🎉 Welcome to Pro!</span>
+                <button onClick={() => void completeOnboarding()} className="text-white/60 hover:text-white text-xl">✕</button>
+              </div>
+              <p className="text-indigo-200 text-sm">You've unlocked the full power of InquiAI. Here's how to get the most out of it.</p>
+            </div>
+
+            {/* Checklist */}
+            <div className="p-6">
+              <div className="space-y-3 mb-6">
+                {[
+                  { icon: '📱', title: 'Connect 2 WhatsApp numbers', desc: 'Go to WhatsApp tab → Add Number', tab: 'whatsapp' },
+                  { icon: '🎭', title: 'Set your AI persona', desc: 'Profile → AI Persona — give your AI a name and tone', tab: 'profile' },
+                  { icon: '🧠', title: 'Train AI on your conversations', desc: 'AI Training tab — upload past WhatsApp exports', tab: 'training' },
+                  { icon: '📣', title: 'Send your first broadcast', desc: 'Bulk Broadcast tab — re-engage old leads', tab: 'broadcast' },
+                  { icon: '📊', title: 'Check your analytics', desc: 'Analytics tab — see peak hours and conversion rates', tab: 'analytics' },
+                ].map((step, i) => (
+                  <div key={i} className="flex items-start gap-3 p-3 bg-gray-50 rounded-xl">
+                    <span className="text-xl flex-shrink-0">{step.icon}</span>
+                    <div className="min-w-0">
+                      <p className="text-sm font-semibold text-gray-900">{step.title}</p>
+                      <p className="text-xs text-gray-500">{step.desc}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Schedule a call CTA */}
+              <div className="bg-indigo-50 border border-indigo-100 rounded-xl p-4 mb-4 text-center">
+                <p className="text-sm font-semibold text-indigo-800 mb-1">Want hands-on setup help?</p>
+                <p className="text-xs text-indigo-600 mb-3">Book a free 20-min onboarding call — we'll set everything up live.</p>
+                <a href="https://inquiai.in/demo" target="_blank" rel="noopener noreferrer"
+                  className="inline-block bg-indigo-600 text-white text-xs font-semibold px-5 py-2 rounded-lg hover:bg-indigo-700 transition-colors">
+                  📞 Schedule Onboarding Call →
+                </a>
+              </div>
+
+              <button onClick={() => void completeOnboarding()}
+                className="w-full bg-gray-900 text-white text-sm font-semibold py-3 rounded-xl hover:bg-gray-800 transition-colors">
+                Let's get started! →
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* QR Modal */}
       {showQRModal && (
@@ -2332,13 +2461,15 @@ setShowQRModal(true);
             <h2 className="text-base font-semibold text-gray-900 mb-4">Institute Profile</h2>
             {/* Sub-tab nav */}
             <div className="flex gap-1 bg-gray-100 p-1 rounded-xl w-full overflow-x-auto">
-              {([
+              {(([
                 { key: 'basic', label: '🏫 Basic Info' },
                 { key: 'details', label: '🤖 AI Details' },
                 { key: 'hours', label: '🕐 Hours' },
                 { key: 'notifications', label: '🔔 Notifications' },
                 { key: 'password', label: '🔒 Password' },
-              ] as const).map(s => (
+                ...(institute.plan === 'pro' && premiumUnlocked ? [{ key: 'persona', label: '🎭 AI Persona' }] : []),
+                { key: 'invoices', label: '🧾 Invoices' },
+              ]) as Array<{ key: 'basic' | 'details' | 'hours' | 'notifications' | 'password' | 'persona' | 'invoices'; label: string }>).map(s => (
                 <button key={s.key}
                   onClick={() => handleProfileSectionChange(s.key)}
                   className={`flex-shrink-0 text-xs font-semibold px-3 py-1.5 rounded-lg transition-colors ${
@@ -2627,6 +2758,110 @@ setShowQRModal(true);
                   {pwSaving ? 'Changing…' : 'Change Password'}
                 </button>
               </div>
+            </div>
+          )}
+
+          {/* ── AI Persona (Pro only) ── */}
+          {profileSection === 'persona' && (
+            <div className="max-w-lg">
+              <p className="text-xs text-gray-500 mb-5">
+                Customise how your AI assistant introduces itself and its communication style. Changes apply to new conversations immediately.
+              </p>
+              {personaMsg && (
+                <div className={`text-sm rounded-lg px-4 py-3 mb-4 ${personaMsg.startsWith('✅') ? 'bg-green-50 border border-green-200 text-green-700' : 'bg-red-50 border border-red-200 text-red-600'}`}>
+                  {personaMsg}
+                </div>
+              )}
+              <div className="space-y-5">
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">AI Assistant Name</label>
+                  <input type="text" value={personaForm.persona_name}
+                    onChange={e => setPersonaForm(f => ({ ...f, persona_name: e.target.value }))}
+                    placeholder="e.g. Priya, Riya, Advit — leave blank to use 'AI Assistant'"
+                    className="w-full text-sm border border-gray-300 rounded-xl px-3 py-2.5 focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <p className="text-xs text-gray-400 mt-1">Students will see this name in conversations. e.g. "Hi! I'm Priya from ABC Coaching 😊"</p>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Communication Tone</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    {[
+                      { value: 'friendly', label: '😊 Friendly', desc: 'Warm and approachable' },
+                      { value: 'professional', label: '💼 Professional', desc: 'Formal and precise' },
+                      { value: 'enthusiastic', label: '🚀 Enthusiastic', desc: 'Energetic and motivating' },
+                      { value: 'concise', label: '⚡ Concise', desc: 'Short and to the point' },
+                    ].map(tone => (
+                      <button key={tone.value}
+                        onClick={() => setPersonaForm(f => ({ ...f, persona_tone: tone.value }))}
+                        className={`p-3 rounded-xl border-2 text-left transition-colors ${personaForm.persona_tone === tone.value ? 'border-indigo-500 bg-indigo-50' : 'border-gray-200 hover:border-gray-300'}`}>
+                        <p className="text-sm font-semibold text-gray-900">{tone.label}</p>
+                        <p className="text-xs text-gray-500">{tone.desc}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Default Language</label>
+                  <div className="flex gap-2">
+                    {[
+                      { value: 'english', label: '🇬🇧 English' },
+                      { value: 'hinglish', label: '🇮🇳 Hinglish' },
+                      { value: 'hindi', label: '🇮🇳 Hindi' },
+                    ].map(lang => (
+                      <button key={lang.value}
+                        onClick={() => setPersonaForm(f => ({ ...f, language_style: lang.value }))}
+                        className={`flex-1 py-2 rounded-xl border-2 text-sm font-medium transition-colors ${personaForm.language_style === lang.value ? 'border-indigo-500 bg-indigo-50 text-indigo-700' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                        {lang.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-1">AI also auto-detects and matches the student's language.</p>
+                </div>
+                <div className="flex justify-end">
+                  <button onClick={() => void handleSavePersona()} disabled={personaSaving}
+                    className="bg-indigo-600 text-white text-sm font-semibold px-6 py-2.5 rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-colors">
+                    {personaSaving ? 'Saving…' : 'Save Persona'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── Invoices ── */}
+          {profileSection === 'invoices' && (
+            <div className="max-w-2xl">
+              <p className="text-xs text-gray-500 mb-5">Your payment and subscription history.</p>
+              {invoicesLoading ? (
+                <div className="text-center py-12"><div className="w-7 h-7 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin mx-auto mb-2" /><p className="text-xs text-gray-400">Loading…</p></div>
+              ) : invoices.length === 0 ? (
+                <div className="bg-gray-50 border border-gray-200 rounded-2xl p-8 text-center">
+                  <div className="text-3xl mb-2">🧾</div>
+                  <p className="text-sm text-gray-500">No invoices yet.</p>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {invoices.map(inv => (
+                    <div key={inv.id} className="bg-white border border-gray-200 rounded-2xl p-4 flex items-center justify-between gap-4">
+                      <div>
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-semibold text-gray-900 capitalize">{inv.plan} Plan</span>
+                          <span className="text-xs bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full capitalize">{inv.billing_cycle}</span>
+                        </div>
+                        <p className="text-xs text-gray-400">
+                          {inv.paid_at ? new Date(inv.paid_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' }) : 'N/A'}
+                          {inv.subscription_expires_at && (
+                            <> · Valid until {new Date(inv.subscription_expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}</>
+                          )}
+                        </p>
+                        <p className="text-xs text-gray-400 mt-0.5">ID: {inv.razorpay_payment_id}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-base font-bold text-gray-900">₹{inv.amount_inr.toLocaleString('en-IN')}</p>
+                        <span className="text-xs text-green-600 font-medium">✅ Paid</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
