@@ -71,6 +71,7 @@ async function saveLead(
   studentPhone: string,
   message: string,
   notifyName?: string | null,
+  waId?: string | null,        // original WhatsApp ID e.g. "9191234@c.us" or "12345@lid"
 ): Promise<{ skipReply: boolean }> {
   try {
     if (isSpam(studentPhone, message)) {
@@ -113,9 +114,9 @@ async function saveLead(
     if (studentName) console.log(`[WA] notifyName: ${studentName}`);
 
     await pool.query(
-      `INSERT INTO leads (institute_id, student_name, student_phone, message, status, last_activity_at)
-       VALUES ($1, $2, $3, $4, 'new', NOW())`,
-      [instituteId, studentName, studentPhone, message],
+      `INSERT INTO leads (institute_id, student_name, student_phone, message, status, last_activity_at, wa_id)
+       VALUES ($1, $2, $3, $4, 'new', NOW(), $5)`,
+      [instituteId, studentName, studentPhone, message, waId ?? null],
     );
     console.log(`[WA] New lead: ${studentPhone}, name: ${studentName ?? 'unknown'}`);
 
@@ -160,11 +161,16 @@ async function buildSystemPrompt(
 ): Promise<string> {
   try {
     const instResult = await pool.query(
-      'SELECT name, website FROM institutes WHERE id = $1',
+      `SELECT i.name, i.website, p.persona_name, p.persona_tone
+       FROM institutes i
+       LEFT JOIN institute_personality p ON p.institute_id = i.id
+       WHERE i.id = $1`,
       [instituteId],
     );
     const instituteName: string = instResult.rows[0]?.name ?? 'this institute';
     const website: string | null = instResult.rows[0]?.website ?? null;
+    const personaName: string = instResult.rows[0]?.persona_name?.trim() || 'AI Assistant';
+    const personaTone: string = instResult.rows[0]?.persona_tone ?? 'friendly';
 
     let instituteData: string | null = null;
     try { instituteData = await getInstituteDetails(instituteId); } catch { /* non-fatal */ }
@@ -223,7 +229,8 @@ async function buildSystemPrompt(
     );
 
     return (
-      `You are an AI admission assistant for ${instituteName}, responding on WhatsApp.\n\n` +
+      `You are ${personaName}, the AI admission assistant for ${instituteName}, responding on WhatsApp.\n` +
+      `Your tone: ${personaTone}.\n\n` +
 
       `STEP 1 — READ THE CONVERSATION STATE\n` +
       `Analyse the conversation below and identify the current state:\n\n` +
@@ -574,7 +581,7 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
     );
     if (crossCheck.rows.length > 0) {
       console.log(`[WA] Cross-institute message from ${phoneClean} — skipping AI reply to prevent loop.`);
-      void saveLead(Number(instituteId), studentPhone, messageText, notifyName);
+      void saveLead(Number(instituteId), studentPhone, messageText, notifyName, msg.from);
       return;
     }
 
@@ -582,7 +589,7 @@ export async function initSession(instituteId: string, slot = 1): Promise<void> 
 		 
 
     // Save lead first — checks status (lost/converted → skip reply)
-    const { skipReply } = await saveLead(Number(instituteId), studentPhone, messageText, notifyName);
+    const { skipReply } = await saveLead(Number(instituteId), studentPhone, messageText, notifyName, msg.from);
     if (skipReply) return;
 
     // AI reply
@@ -680,31 +687,33 @@ export async function sendMessageToStudent(
   instituteId: string,
   toNumber: string,
   message: string,
+  waId?: string | null,         // preferred: original WhatsApp ID from leads.wa_id
 ): Promise<boolean> {
-  // Try all connected sessions for this institute
+  // Build a list of numbers to try, in priority order:
+  // 1. waId (original format from when they messaged — most reliable)
+  // 2. toNumber as-is
+  // 3. @lid variant if toNumber is @c.us
+  const candidates: string[] = [];
+  if (waId && waId !== toNumber) candidates.push(waId);
+  candidates.push(toNumber);
+  if (toNumber.endsWith('@c.us')) candidates.push(toNumber.replace('@c.us', '') + '@lid');
+
   for (const [key, s] of sessions.entries()) {
-    if (!key.startsWith(instituteId) && key !== instituteId) continue;
+    if (key !== instituteId && !key.startsWith(`${instituteId}-`)) continue;
     if (s.status !== 'connected') continue;
 
-    try {
-      await s.client.sendMessage(toNumber, message);
-      return true;
-    } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-
-      // "No LID for user" — this number uses WhatsApp's newer @lid format.
-      // Strip @c.us and retry with @lid format.
-      if (errMsg.includes('No LID') && toNumber.endsWith('@c.us')) {
-        const lidNumber = toNumber.replace('@c.us', '') + '@lid';
-        console.log(`[WA] Retrying with @lid format: ${lidNumber}`);
-        try {
-          await s.client.sendMessage(lidNumber, message);
-          return true;
-        } catch (lidErr) {
-          console.error(`[WA] sendMessageToStudent @lid retry also failed:`, lidErr);
+    for (const num of candidates) {
+      try {
+        await s.client.sendMessage(num, message);
+        console.log(`[WA] Message sent to ${num} via session ${key}`);
+        return true;
+      } catch (err) {
+        const errMsg = err instanceof Error ? err.message : String(err);
+        if (errMsg.includes('No LID') || errMsg.includes('invalid wid')) {
+          console.log(`[WA] ${num} failed (${errMsg.slice(0, 40)}), trying next format…`);
+          continue; // try next candidate
         }
-      } else {
-        console.error(`[WA] sendMessageToStudent failed on ${key}:`, err);
+        console.error(`[WA] sendMessageToStudent failed on ${key} → ${num}:`, err);
       }
     }
   }

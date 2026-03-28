@@ -67,6 +67,7 @@ interface InstituteRow {
   subscription_billing_cycle: string | null;
   subscription_expires_at: string | null;
   subscription_status: string | null;
+  pro_onboarded: boolean;
 }
 
 const PBKDF2_ITERATIONS = 100_000;
@@ -453,6 +454,7 @@ router.post('/login', async (req: Request, res: Response) => {
       created_at: institute.created_at,
       subscription_billing_cycle: institute.subscription_billing_cycle ?? null,
       subscription_expires_at: institute.subscription_expires_at ?? null,
+      pro_onboarded: institute.pro_onboarded ?? true,
     });
   } catch (err) {
     console.error('Login error:', err);
@@ -1025,450 +1027,109 @@ router.post('/:id/change-password', async (req: Request, res: Response) => {
   }
 });
 
-																																								 
-													 
-																					  
+// ── GET /api/institutes/:id/invoices ─────────────────────────────────────────
+// Returns past successful payments for invoice history page
+router.get('/:id/invoices', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT
+         p.id,
+         p.plan,
+         p.billing_cycle,
+         p.amount_inr,
+         p.razorpay_payment_id,
+         p.razorpay_order_id,
+         p.paid_at,
+         p.created_at,
+         s.expires_at AS subscription_expires_at
+       FROM payments p
+       LEFT JOIN subscriptions s
+         ON s.institute_id = p.institute_id
+         AND s.razorpay_order_id = p.razorpay_order_id
+       WHERE p.institute_id = $1 AND p.status = 'success'
+       ORDER BY p.paid_at DESC NULLS LAST`,
+      [id],
+    );
+    res.json(result.rows);
+  } catch (err) {
+    console.error('Invoice history error:', err);
+    res.status(500).json({ error: 'Failed to fetch invoice history.' });
+  }
+});
 
-																		
-								   
-												
-													
-	
+// ── POST /api/institutes/:id/complete-onboarding ──────────────────────────────
+// Mark Pro onboarding as completed so the modal doesn't show again
 
-																								
+router.post('/:id/complete-onboarding', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    await pool.query(
+      `UPDATE institutes SET pro_onboarded = TRUE WHERE id = $1`, [id],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed.' });
+  }
+});
 
-										   
-																								 
+// ── GET/PATCH /api/institutes/:id/persona ─────────────────────────────────────
+// Custom AI persona (Pro plan feature)
 
-	   
-									
-																			  
-																		
-																				
-												 
-														   
-	  
-																									  
-																	
-							 
-				 
-												   
-																	
-   
-   
+router.get('/:id/persona', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  try {
+    const result = await pool.query(
+      `SELECT persona_name, persona_tone, language_style FROM institute_personality WHERE institute_id = $1`,
+      [id],
+    );
+    res.json(result.rows[0] ?? { persona_name: null, persona_tone: 'friendly', language_style: 'english' });
+  } catch (err) {
+    res.status(500).json({ error: 'Failed to fetch persona.' });
+  }
+});
 
-																																						 
-							
+router.patch('/:id/persona', async (req: Request, res: Response) => {
+  const id = Number(req.params.id);
+  const { persona_name, persona_tone, language_style } = req.body as {
+    persona_name?: string | null;
+    persona_tone?: string;
+    language_style?: string;
+  };
 
-																			
-								   
-																					  
-															  
-																				 
-   
-	   
-					 
-																
-										   
-	  
-								
-				 
-													   
-																		
-   
-   
+  // Pro plan only
+  const plan = await getInstitutePlan(id);
+  if (plan !== 'pro') {
+    res.status(403).json({ error: 'Custom AI persona is a Pro plan feature.', code: 'PLAN_UPGRADE_REQUIRED' });
+    return;
+  }
 
-																																							 
+  const VALID_TONES = ['friendly', 'professional', 'enthusiastic', 'concise'];
+  const VALID_LANGS = ['english', 'hinglish', 'hindi'];
 
-																		  
-								   
-	   
-									
-																  
-	  
-																		 
-				 
-																	   
-   
-   
+  if (persona_tone && !VALID_TONES.includes(persona_tone)) {
+    res.status(400).json({ error: `Invalid tone. Use: ${VALID_TONES.join(', ')}` }); return;
+  }
+  if (language_style && !VALID_LANGS.includes(language_style)) {
+    res.status(400).json({ error: `Invalid language. Use: ${VALID_LANGS.join(', ')}` }); return;
+  }
 
-																																  
-
-																					  
-								   
-																					   
-							  
-								  
-									
-	
-	   
-					 
-						
-														   
-																   
-																	  
-					  
-	   
-								
-									
-									  
-		   
-		
-	  
-								
-				 
-														   
-																				  
-   
-   
-
-																																	  
-
-																					
-								   
-	   
-									
-																		 
-											
-	  
-								
-							
-								
-								   
-	   
-				 
-																				 
-   
-   
-
-																																						 
-
-																			
-								   
-														  
-													 
-	
-										   
-																						   
-   
-								
-																						   
-   
-	   
-									
-																					  
-	  
-																		 
-																				   
-																
-																				
-	 
-											   
-																							  
-																  
-								
-				 
-												 
-																  
-   
-   
-
-										 
-			  
-					   
-
-				  
-		   
-			
-			 
- 
-
-						
-
-			 
-						 
-
-	
-		 
-					 
-				  
-					
-			 
-				 
-   
-						   
-				 
-		
-	 
-			   
-				 
-   
-   
-
-									   
-	   
-
-				   
-		   
-					   
-				 
-					 
-   
-	
-	  
-				
-			 
-   
-		
-	 
-				
-				  
-   
-   
-
-										
-
-					
-		   
-	
-		 
-				  
-   
-				   
-	 
-					
-   
-   
-
-								  
-
-					   
-		   
-						
-		 
-		  
-		 
- 
-	
-	  
-	  
-				 
-				   
-				   
-	   
-	
-		
-		 
-		   
-	 
-  
-   
-		
-	 
-				 
-					  
-   
-   
-
-								   
-
-					 
-		   
-	
-		 
-				   
-		   
-   
-		
-	   
-		
-		   
-	
-	 
-					 
-   
-   
-
-									   
-
-				   
-		   
-				
-			  
- 
-			 
-						 
-   
-		
-						 
-   
-	
-		 
-					   
-   
-				   
-					   
-				
-					
-  
-			  
-						 
-				  
-		
-	 
-			 
-				  
-   
-   
-
-
-		   
-	 
-		
-
-	  
-	 
-   
-	
- 
-
-	  
-
-	
-	   
-
- 
-   
-	  
-	  
-	 
-	
-	 
-   
-		 
-	 
-  
-  
-	  
-	 
-   
-   
-
-			
-	
-
-	   
-	 
-		
-	 
-	  
-   
- 
-   
-	
-	
-   
-  
-  
-	
-	  
-   
-   
-
-		  
-
-	 
-	 
- 
-   
-	  
-   
-	   
-  
-	 
-   
-   
-
-		  
-
-		
-	 
-	  
-   
-	
-   
- 
- 
-   
-   
-	 
-	   
-	   
-	
- 
-  
-   
-	 
-  
-  
-   
-  
-  
-	 
-	   
-   
-   
-
-		   
-
-	  
-	 
- 
-   
-	   
-	 
-   
-  
-	
-  
-	 
- 
-  
-	  
-   
-   
-
-			
-
-	   
-	 
-	
-	 
- 
-	
-	   
-   
-  
-	   
-   
- 
-   
-		
-   
-	   
-		
-	
-	 
-  
-	 
-	   
-	  
-  
-  
-	
-	  
-   
-   
+  try {
+    await pool.query(
+      `INSERT INTO institute_personality (institute_id, profile, persona_name, persona_tone, language_style, generated_at)
+       VALUES ($1, '', $2, $3, $4, NOW())
+       ON CONFLICT (institute_id) DO UPDATE SET
+         persona_name   = COALESCE(EXCLUDED.persona_name, institute_personality.persona_name),
+         persona_tone   = COALESCE(EXCLUDED.persona_tone, institute_personality.persona_tone),
+         language_style = COALESCE(EXCLUDED.language_style, institute_personality.language_style)`,
+      [id, persona_name?.trim() || null, persona_tone ?? 'friendly', language_style ?? 'english'],
+    );
+    res.json({ success: true });
+  } catch (err) {
+    console.error('Persona update error:', err);
+    res.status(500).json({ error: 'Failed to update persona.' });
+  }
+});
 
 // DELETE /api/institutes/:id/disconnect-whatsapp
 router.delete('/:id/disconnect-whatsapp', async (req: Request, res: Response) => {
