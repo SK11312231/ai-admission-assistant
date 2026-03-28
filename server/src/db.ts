@@ -259,6 +259,13 @@ export async function initDB(): Promise<void> {
       generated_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
     )
   `);
+  // Custom AI persona fields (Pro feature)
+  await pool.query(`ALTER TABLE institute_personality ADD COLUMN IF NOT EXISTS persona_name TEXT`);
+  await pool.query(`ALTER TABLE institute_personality ADD COLUMN IF NOT EXISTS persona_tone TEXT DEFAULT 'friendly'`);
+  // pro_onboarded: tracks if Pro onboarding checklist has been shown
+  await pool.query(`ALTER TABLE institutes ADD COLUMN IF NOT EXISTS pro_onboarded BOOLEAN NOT NULL DEFAULT FALSE`);
+  // lead_wa_id: stores original WhatsApp identifier (@c.us or @lid) for reliable sending
+  await pool.query(`ALTER TABLE leads ADD COLUMN IF NOT EXISTS wa_id TEXT`);
 
   await pool.query(`
     CREATE TABLE IF NOT EXISTS reply_feedback (
