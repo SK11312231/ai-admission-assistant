@@ -249,7 +249,6 @@ export default function Dashboard() {
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   // Pro onboarding modal
   const [showOnboarding, setShowOnboarding] = useState(false);
-  const [onboardingStep, setOnboardingStep] = useState(0);
 
   // ── Analytics state ─────────────────────────────────────────────────────────
   const [analyticsOverview, setAnalyticsOverview] = useState<AnalyticsOverview | null>(null);
