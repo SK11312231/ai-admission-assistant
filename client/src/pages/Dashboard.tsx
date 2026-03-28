@@ -800,9 +800,6 @@ setShowQRModal(true);
       : 'N/A';
     const invoiceNum = `INQ-${inv.id.toString().padStart(5, '0')}`;
 
-    // Build invoice content lines for PDF
-    const lines: Array<{ text: string; x: number; y: number; size: number; bold?: boolean; color?: [number,number,number] }> = [];
-
     // Dynamically load jsPDF from CDN (no install needed)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { jsPDF } = await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js' as string) as { jsPDF: any };
