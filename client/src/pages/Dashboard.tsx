@@ -790,6 +790,108 @@ setShowQRModal(true);
     finally { setInvoicesLoading(false); }
   };
 
+  const downloadInvoice = async (inv: typeof invoices[number]) => {
+    if (!institute) return;
+    const paidDate = inv.paid_at
+      ? new Date(inv.paid_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : 'N/A';
+    const validUntil = inv.subscription_expires_at
+      ? new Date(inv.subscription_expires_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
+      : 'N/A';
+    const invoiceNum = `INQ-${inv.id.toString().padStart(5, '0')}`;
+
+    // Build invoice content lines for PDF
+    const lines: Array<{ text: string; x: number; y: number; size: number; bold?: boolean; color?: [number,number,number] }> = [];
+
+    // Dynamically load jsPDF from CDN (no install needed)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { jsPDF } = await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js' as string) as { jsPDF: any };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as any;
+
+    const W = 210; // A4 width mm
+    const margin = 18;
+    let y = margin;
+
+    const addText = (text: string, x: number, yPos: number, size: number, bold = false, color: [number,number,number] = [17,24,39]) => {
+      doc.setFontSize(size);
+      doc.setFont('helvetica', bold ? 'bold' : 'normal');
+      doc.setTextColor(...color);
+      doc.text(text, x, yPos);
+    };
+
+    // Header — brand
+    addText('InquiAI', margin, y + 6, 22, true, [79, 70, 229]);
+    addText('INVOICE', W - margin, y + 2, 20, true, [79, 70, 229]);
+    doc.setFontSize(9); doc.setTextColor(107,114,128);
+    doc.text('inquiai.in  ·  support@inquiai.in', margin, y + 12);
+    doc.text(invoiceNum, W - margin, y + 8, { align: 'right' });
+    doc.text(`Date: ${paidDate}`, W - margin, y + 13, { align: 'right' });
+
+    y += 20;
+    doc.setDrawColor(229, 231, 235); doc.setLineWidth(0.4);
+    doc.line(margin, y, W - margin, y);
+    y += 10;
+
+    // Billed to
+    addText('BILLED TO', margin, y, 8, true, [156, 163, 175]);
+    y += 5;
+    addText(institute.name, margin, y, 11, true);
+    y += 5;
+    addText(institute.email, margin, y, 10, false, [55, 65, 81]);
+    y += 5;
+    addText(institute.phone, margin, y, 10, false, [55, 65, 81]);
+
+    // Payment status (right side)
+    addText('PAYMENT STATUS', W - margin - 40, y - 15, 8, true, [156, 163, 175]);
+    doc.setFillColor(220, 252, 231);
+    doc.roundedRect(W - margin - 28, y - 12, 28, 7, 2, 2, 'F');
+    addText('✓  PAID', W - margin - 14, y - 7, 9, true, [22, 101, 52]);
+    addText(inv.razorpay_payment_id.slice(0, 20), W - margin, y - 1, 7, false, [107, 114, 128]);
+
+    y += 14;
+    doc.line(margin, y, W - margin, y);
+    y += 10;
+
+    // Table header
+    doc.setFillColor(249, 250, 251);
+    doc.rect(margin, y - 5, W - margin * 2, 9, 'F');
+    addText('DESCRIPTION', margin + 2, y + 1, 8, true, [107, 114, 128]);
+    addText('BILLING', 120, y + 1, 8, true, [107, 114, 128]);
+    addText('PERIOD', 148, y + 1, 8, true, [107, 114, 128]);
+    addText('AMOUNT', W - margin - 2, y + 1, 8, true, [107, 114, 128]);
+    y += 8;
+    doc.line(margin, y, W - margin, y);
+    y += 7;
+
+    // Table row
+    addText(`InquiAI ${inv.plan.charAt(0).toUpperCase() + inv.plan.slice(1)} Plan`, margin + 2, y, 11, true);
+    addText('AI Admission Assistant — WhatsApp Automation', margin + 2, y + 5, 8, false, [107, 114, 128]);
+    addText(inv.billing_cycle.charAt(0).toUpperCase() + inv.billing_cycle.slice(1), 120, y, 10);
+    const period = validUntil !== 'N/A' ? `${paidDate.split(' ').slice(0,2).join(' ')} → ${validUntil}` : paidDate;
+    addText(period, 148, y, 8, false, [55, 65, 81]);
+    addText(`\u20B9${inv.amount_inr.toLocaleString('en-IN')}`, W - margin - 2, y, 11, true);
+    y += 16;
+
+    // Total row
+    doc.line(margin, y, W - margin, y);
+    y += 7;
+    doc.setFillColor(249, 250, 251);
+    doc.rect(margin, y - 5, W - margin * 2, 10, 'F');
+    addText('TOTAL PAID', W - margin - 40, y + 1, 10, true);
+    addText(`\u20B9${inv.amount_inr.toLocaleString('en-IN')}`, W - margin - 2, y + 1, 13, true, [79, 70, 229]);
+    y += 14;
+
+    // Footer
+    y = 270;
+    doc.line(margin, y, W - margin, y);
+    y += 6;
+    addText('InquiAI — AI-powered admission assistant for coaching institutes', W / 2, y, 8, false, [156, 163, 175]);
+    doc.text('This is a computer-generated invoice and does not require a signature.', W / 2, y + 5, { align: 'center' });
+
+    doc.save(`InquiAI-Invoice-${invoiceNum}.pdf`);
+  };
+
   // ── Pro onboarding ───────────────────────────────────────────────────────────
   const completeOnboarding = async () => {
     if (!institute) return;
@@ -2853,9 +2955,14 @@ setShowQRModal(true);
                         </p>
                         <p className="text-xs text-gray-400 mt-0.5">ID: {inv.razorpay_payment_id}</p>
                       </div>
-                      <div className="text-right flex-shrink-0">
+                      <div className="text-right flex-shrink-0 flex flex-col items-end gap-2">
                         <p className="text-base font-bold text-gray-900">₹{inv.amount_inr.toLocaleString('en-IN')}</p>
                         <span className="text-xs text-green-600 font-medium">✅ Paid</span>
+                        <button
+                          onClick={() => void downloadInvoice(inv)}
+                          className="text-xs text-indigo-600 border border-indigo-200 bg-indigo-50 hover:bg-indigo-100 px-3 py-1 rounded-lg transition-colors font-medium">
+                          ⬇ Download PDF
+                        </button>
                       </div>
                     </div>
                   ))}
