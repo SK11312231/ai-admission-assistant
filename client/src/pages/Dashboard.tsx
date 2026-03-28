@@ -790,8 +790,9 @@ setShowQRModal(true);
     finally { setInvoicesLoading(false); }
   };
 
-  const downloadInvoice = async (inv: typeof invoices[number]) => {
+  const downloadInvoice = (inv: typeof invoices[number]) => {
     if (!institute) return;
+
     const paidDate = inv.paid_at
       ? new Date(inv.paid_at).toLocaleDateString('en-IN', { day: 'numeric', month: 'long', year: 'numeric' })
       : 'N/A';
@@ -800,93 +801,107 @@ setShowQRModal(true);
       : 'N/A';
     const invoiceNum = `INQ-${inv.id.toString().padStart(5, '0')}`;
 
-    // Dynamically load jsPDF from CDN (no install needed)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { jsPDF } = await import('https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js' as string) as { jsPDF: any };
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as any;
+    const buildAndDownload = () => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { jsPDF } = (window as any).jspdf as { jsPDF: any };
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' }) as any;
 
-    const W = 210; // A4 width mm
-    const margin = 18;
-    let y = margin;
+      const W = 210;
+      const margin = 18;
+      let y = margin;
 
-    const addText = (text: string, x: number, yPos: number, size: number, bold = false, color: [number,number,number] = [17,24,39]) => {
-      doc.setFontSize(size);
-      doc.setFont('helvetica', bold ? 'bold' : 'normal');
-      doc.setTextColor(...color);
-      doc.text(text, x, yPos);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const addText = (text: string, x: number, yPos: number, size: number, bold = false, color: [number,number,number] = [17,24,39], opts?: any) => {
+        doc.setFontSize(size);
+        doc.setFont('helvetica', bold ? 'bold' : 'normal');
+        doc.setTextColor(...color);
+        doc.text(text, x, yPos, opts);
+      };
+
+      // Header
+      addText('InquiAI', margin, y + 6, 22, true, [79, 70, 229]);
+      addText('INVOICE', W - margin, y + 2, 20, true, [79, 70, 229], { align: 'right' });
+      doc.setFontSize(9); doc.setTextColor(107, 114, 128);
+      doc.text('inquiai.in  ·  support@inquiai.in', margin, y + 12);
+      doc.text(invoiceNum, W - margin, y + 8, { align: 'right' });
+      doc.text(`Date: ${paidDate}`, W - margin, y + 13, { align: 'right' });
+      y += 20;
+
+      doc.setDrawColor(229, 231, 235); doc.setLineWidth(0.4);
+      doc.line(margin, y, W - margin, y);
+      y += 10;
+
+      // Billed to
+      addText('BILLED TO', margin, y, 8, true, [156, 163, 175]);
+      y += 5;
+      addText(institute.name, margin, y, 11, true);
+      y += 5;
+      addText(institute.email, margin, y, 10, false, [55, 65, 81]);
+      y += 5;
+      addText(institute.phone, margin, y, 10, false, [55, 65, 81]);
+
+      // Payment status
+      addText('PAYMENT STATUS', W - margin - 42, y - 15, 8, true, [156, 163, 175]);
+      doc.setFillColor(220, 252, 231);
+      doc.roundedRect(W - margin - 28, y - 12, 28, 7, 2, 2, 'F');
+      addText('PAID', W - margin - 14, y - 7, 9, true, [22, 101, 52], { align: 'center' });
+      doc.setFontSize(7); doc.setTextColor(107, 114, 128);
+      doc.text(inv.razorpay_payment_id, W - margin, y - 1, { align: 'right' });
+
+      y += 14;
+      doc.line(margin, y, W - margin, y);
+      y += 10;
+
+      // Table header
+      doc.setFillColor(249, 250, 251);
+      doc.rect(margin, y - 5, W - margin * 2, 9, 'F');
+      addText('DESCRIPTION', margin + 2, y + 1, 8, true, [107, 114, 128]);
+      addText('BILLING', 120, y + 1, 8, true, [107, 114, 128]);
+      addText('VALID UNTIL', 148, y + 1, 8, true, [107, 114, 128]);
+      addText('AMOUNT', W - margin - 2, y + 1, 8, true, [107, 114, 128], { align: 'right' });
+      y += 8;
+      doc.line(margin, y, W - margin, y);
+      y += 7;
+
+      // Table row
+      addText(`InquiAI ${inv.plan.charAt(0).toUpperCase() + inv.plan.slice(1)} Plan`, margin + 2, y, 11, true);
+      addText('AI Admission Assistant — WhatsApp Automation', margin + 2, y + 5, 8, false, [107, 114, 128]);
+      addText(inv.billing_cycle.charAt(0).toUpperCase() + inv.billing_cycle.slice(1), 120, y, 10);
+      addText(validUntil !== 'N/A' ? validUntil : '—', 148, y, 9, false, [55, 65, 81]);
+      addText(`Rs.${inv.amount_inr.toLocaleString('en-IN')}`, W - margin - 2, y, 11, true, [17, 24, 39], { align: 'right' });
+      y += 16;
+
+      // Total
+      doc.line(margin, y, W - margin, y);
+      y += 7;
+      doc.setFillColor(249, 250, 251);
+      doc.rect(margin, y - 5, W - margin * 2, 10, 'F');
+      addText('TOTAL PAID', W - margin - 44, y + 1, 10, true);
+      addText(`Rs.${inv.amount_inr.toLocaleString('en-IN')}`, W - margin - 2, y + 1, 13, true, [79, 70, 229], { align: 'right' });
+      y += 14;
+
+      // Footer
+      y = 270;
+      doc.line(margin, y, W - margin, y);
+      y += 6;
+      doc.setFontSize(8); doc.setTextColor(156, 163, 175);
+      doc.text('InquiAI — AI-powered admission assistant for coaching institutes', W / 2, y, { align: 'center' });
+      doc.text('This is a computer-generated invoice and does not require a signature.', W / 2, y + 5, { align: 'center' });
+
+      doc.save(`InquiAI-Invoice-${invoiceNum}.pdf`);
     };
 
-    // Header — brand
-    addText('InquiAI', margin, y + 6, 22, true, [79, 70, 229]);
-    addText('INVOICE', W - margin, y + 2, 20, true, [79, 70, 229]);
-    doc.setFontSize(9); doc.setTextColor(107,114,128);
-    doc.text('inquiai.in  ·  support@inquiai.in', margin, y + 12);
-    doc.text(invoiceNum, W - margin, y + 8, { align: 'right' });
-    doc.text(`Date: ${paidDate}`, W - margin, y + 13, { align: 'right' });
-
-    y += 20;
-    doc.setDrawColor(229, 231, 235); doc.setLineWidth(0.4);
-    doc.line(margin, y, W - margin, y);
-    y += 10;
-
-    // Billed to
-    addText('BILLED TO', margin, y, 8, true, [156, 163, 175]);
-    y += 5;
-    addText(institute.name, margin, y, 11, true);
-    y += 5;
-    addText(institute.email, margin, y, 10, false, [55, 65, 81]);
-    y += 5;
-    addText(institute.phone, margin, y, 10, false, [55, 65, 81]);
-
-    // Payment status (right side)
-    addText('PAYMENT STATUS', W - margin - 40, y - 15, 8, true, [156, 163, 175]);
-    doc.setFillColor(220, 252, 231);
-    doc.roundedRect(W - margin - 28, y - 12, 28, 7, 2, 2, 'F');
-    addText('✓  PAID', W - margin - 14, y - 7, 9, true, [22, 101, 52]);
-    addText(inv.razorpay_payment_id.slice(0, 20), W - margin, y - 1, 7, false, [107, 114, 128]);
-
-    y += 14;
-    doc.line(margin, y, W - margin, y);
-    y += 10;
-
-    // Table header
-    doc.setFillColor(249, 250, 251);
-    doc.rect(margin, y - 5, W - margin * 2, 9, 'F');
-    addText('DESCRIPTION', margin + 2, y + 1, 8, true, [107, 114, 128]);
-    addText('BILLING', 120, y + 1, 8, true, [107, 114, 128]);
-    addText('PERIOD', 148, y + 1, 8, true, [107, 114, 128]);
-    addText('AMOUNT', W - margin - 2, y + 1, 8, true, [107, 114, 128]);
-    y += 8;
-    doc.line(margin, y, W - margin, y);
-    y += 7;
-
-    // Table row
-    addText(`InquiAI ${inv.plan.charAt(0).toUpperCase() + inv.plan.slice(1)} Plan`, margin + 2, y, 11, true);
-    addText('AI Admission Assistant — WhatsApp Automation', margin + 2, y + 5, 8, false, [107, 114, 128]);
-    addText(inv.billing_cycle.charAt(0).toUpperCase() + inv.billing_cycle.slice(1), 120, y, 10);
-    const period = validUntil !== 'N/A' ? `${paidDate.split(' ').slice(0,2).join(' ')} → ${validUntil}` : paidDate;
-    addText(period, 148, y, 8, false, [55, 65, 81]);
-    addText(`\u20B9${inv.amount_inr.toLocaleString('en-IN')}`, W - margin - 2, y, 11, true);
-    y += 16;
-
-    // Total row
-    doc.line(margin, y, W - margin, y);
-    y += 7;
-    doc.setFillColor(249, 250, 251);
-    doc.rect(margin, y - 5, W - margin * 2, 10, 'F');
-    addText('TOTAL PAID', W - margin - 40, y + 1, 10, true);
-    addText(`\u20B9${inv.amount_inr.toLocaleString('en-IN')}`, W - margin - 2, y + 1, 13, true, [79, 70, 229]);
-    y += 14;
-
-    // Footer
-    y = 270;
-    doc.line(margin, y, W - margin, y);
-    y += 6;
-    addText('InquiAI — AI-powered admission assistant for coaching institutes', W / 2, y, 8, false, [156, 163, 175]);
-    doc.text('This is a computer-generated invoice and does not require a signature.', W / 2, y + 5, { align: 'center' });
-
-    doc.save(`InquiAI-Invoice-${invoiceNum}.pdf`);
+    // Load jsPDF from CDN via script tag if not already loaded
+    if ((window as any).jspdf) {
+      buildAndDownload();
+    } else {
+      const script = document.createElement('script');
+      script.src = 'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js';
+      script.onload = () => buildAndDownload();
+      script.onerror = () => alert('Failed to load PDF library. Please check your internet connection.');
+      document.head.appendChild(script);
+    }
   };
 
   // ── Pro onboarding ───────────────────────────────────────────────────────────
